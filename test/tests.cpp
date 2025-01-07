@@ -17,6 +17,7 @@
  * limitations under the License.
  */
 #include <gtest/gtest.h>
+
 #include "../tidesdb.hpp"
 
 const char* column_name = "my_db";
@@ -32,61 +33,61 @@ const tidesdb_memtable_ds_t memtable_ds = TDB_MEMTABLE_HASH_TABLE;
 
 TEST(TidesDB, Open_and_Close)
 {
-    TidesDB db;
-    EXPECT_EQ(db.open("tmp"), 0);
-    EXPECT_EQ(db.close(), 0);
+    TidesDB::DB db;
+    EXPECT_EQ(db.Open("tmp"), 0);
+    EXPECT_EQ(db.Close(), 0);
 }
 TEST(TidesDB, Create_and_Drop_Column_Family)
 {
-    TidesDB db;
-    EXPECT_EQ(db.open("tmp"), 0);
-    EXPECT_EQ(db.create_column_family(column_name, flush_threshold, max_level, probability,
-                                      bloom_filter, compression_algo, compressed, memtable_ds),
+    TidesDB::DB db;
+    EXPECT_EQ(db.Open("tmp"), 0);
+    EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
+                                    bloom_filter, compression_algo, compressed, memtable_ds),
               0);
-    EXPECT_EQ(db.drop_column_family(column_name), 0);
-    EXPECT_EQ(db.close(), 0);
+    EXPECT_EQ(db.DropColumnFamily(column_name), 0);
+    EXPECT_EQ(db.Close(), 0);
 }
 
 TEST(TidesDB, Create_and_Column_Family_and_Put)
 {
-    TidesDB db;
-    EXPECT_EQ(db.open("tmp"), 0);
-    EXPECT_EQ(db.create_column_family(column_name, flush_threshold, max_level, probability,
-                                      bloom_filter, compression_algo, compressed, memtable_ds),
+    TidesDB::DB db;
+    EXPECT_EQ(db.Open("tmp"), 0);
+    EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
+                                    bloom_filter, compression_algo, compressed, memtable_ds),
               0);
-    EXPECT_EQ(db.put(column_name, (const uint8_t*)key, (const uint8_t*)value, -1), 0);
-    EXPECT_EQ(db.drop_column_family(column_name), 0);
-    EXPECT_EQ(db.close(), 0);
+    EXPECT_EQ(db.Put(column_name, (const uint8_t*)key, (const uint8_t*)value, -1), 0);
+    EXPECT_EQ(db.DropColumnFamily(column_name), 0);
+    EXPECT_EQ(db.Close(), 0);
 }
 
 TEST(TidesDB, Put_and_Get)
 {
-    TidesDB db;
+    TidesDB::DB db;
     uint8_t* got_value = nullptr;
     size_t got_value_size = 0;
-    EXPECT_EQ(db.open("tmp"), 0);
-    EXPECT_EQ(db.create_column_family(column_name, flush_threshold, max_level, probability,
-                                      bloom_filter, compression_algo, compressed, memtable_ds),
+    EXPECT_EQ(db.Open("tmp"), 0);
+    EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
+                                    bloom_filter, compression_algo, compressed, memtable_ds),
               0);
-    EXPECT_EQ(db.put(column_name, (const uint8_t*)key, (const uint8_t*)value, -1), 0);
-    EXPECT_EQ(db.get(column_name, (const uint8_t*)key, &got_value, got_value_size), 0);
+    EXPECT_EQ(db.Put(column_name, (const uint8_t*)key, (const uint8_t*)value, -1), 0);
+    EXPECT_EQ(db.Get(column_name, (const uint8_t*)key, &got_value, got_value_size), 0);
     EXPECT_STREQ(value, (const char*)got_value);
-    EXPECT_EQ(db.drop_column_family(column_name), 0);
-    EXPECT_EQ(db.close(), 0);
+    EXPECT_EQ(db.DropColumnFamily(column_name), 0);
+    EXPECT_EQ(db.Close(), 0);
 }
 
 TEST(TidesDB, Put_and_Delete)
 {
-    TidesDB db;
+    TidesDB::DB db;
     uint8_t* got_value = nullptr;
     size_t got_value_size = 0;
-    EXPECT_EQ(db.open("tmp"), 0);
-    EXPECT_EQ(db.create_column_family(column_name, flush_threshold, max_level, probability,
-                                      bloom_filter, compression_algo, compressed, memtable_ds),
+    EXPECT_EQ(db.Open("tmp"), 0);
+    EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
+                                    bloom_filter, compression_algo, compressed, memtable_ds),
               0);
-    EXPECT_EQ(db.put(column_name, (const uint8_t*)key, (const uint8_t*)value, -1), 0);
-    EXPECT_EQ(db.delete_key(column_name, (const uint8_t*)key), 0);
-    EXPECT_NE(db.get(column_name, (const uint8_t*)key, &got_value, got_value_size), 0);
-    EXPECT_EQ(db.drop_column_family(column_name), 0);
-    EXPECT_EQ(db.close(), 0);
+    EXPECT_EQ(db.Put(column_name, (const uint8_t*)key, (const uint8_t*)value, -1), 0);
+    EXPECT_EQ(db.Delete(column_name, (const uint8_t*)key), 0);
+    EXPECT_NE(db.Get(column_name, (const uint8_t*)key, &got_value, got_value_size), 0);
+    EXPECT_EQ(db.DropColumnFamily(column_name), 0);
+    EXPECT_EQ(db.Close(), 0);
 }
