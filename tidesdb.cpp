@@ -85,13 +85,14 @@ int DB::Get(const std::string &column_family_name, const std::vector<uint8_t> *k
             std::vector<uint8_t> *value) const
 {
     size_t key_size = key->size();
-    size_t value_size = value->size();
-    uint8_t *value_data = value->data();
+    unsigned char *value_data = nullptr;
+    unsigned long value_size = 0;
     tidesdb_err_t *err = tidesdb_get(this->tdb, column_family_name.c_str(), key->data(), key_size,
                                      &value_data, &value_size);
     if (err == nullptr)
     {
-        value->resize(value_size);
+        value->assign(value_data, value_data + value_size);
+        free(value_data);
     }
     ERR_HANDLER()
 }
@@ -148,15 +149,15 @@ int Txn::Begin()
 int Txn::Put(const std::vector<uint8_t> *key, const std::vector<uint8_t> *value,
              std::chrono::seconds ttl) const
 {
-    time_t ttl_time = ttl.count();
-    tidesdb_err_t *err = tidesdb_txn_put(this->txn, key->data(), size_t(key->size), value->data(),
-                                         size_t(value->size), ttl_time);
+    auto ttl_time = std::chrono::duration_cast<std::chrono::seconds>(ttl).count();
+    tidesdb_err_t *err = tidesdb_txn_put(this->txn, key->data(), size_t(key->size()), value->data(),
+                                         size_t(value->size()), ttl_time);
     ERR_HANDLER()
 }
 
 int Txn::Delete(const std::vector<uint8_t> *key) const
 {
-    tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key->data(), size_t(key->size));
+    tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key->data(), size_t(key->size()));
     ERR_HANDLER()
 }
 
@@ -215,6 +216,11 @@ int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)
     tidesdb_err_t *err =
         tidesdb_cursor_get(this->cursor, &key_data, &key_size, &value_data, &value_size);
     ERR_HANDLER()
+}
+
+tidesdb_t *DB::GetTidesDB() const
+{
+    return this->tdb;
 }
 
 }  // namespace TidesDB

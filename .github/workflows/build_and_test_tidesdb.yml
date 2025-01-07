@@ -1,4 +1,4 @@
-name: TidesDB CI
+name: TidesDB C++ CI
 
 on:
   push:
