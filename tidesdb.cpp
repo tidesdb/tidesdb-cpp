@@ -217,4 +217,9 @@ int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)
     ERR_HANDLER()
 }
 
+tidesdb_t *DB::GetTidesDB() const
+{
+    return this->tdb;
+}
+
 }  // namespace TidesDB
