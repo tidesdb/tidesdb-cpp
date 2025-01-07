@@ -21,6 +21,7 @@
 #include <tidesdb.h>
 
 #include <iostream>
+#include <utility>
 
 #define ERR_HANDLER()                           \
     if (err)                                    \
@@ -40,9 +41,9 @@ DB::DB(void)
     tdb = nullptr;
 }
 
-int DB::Open(const char *dir_name)
+int DB::Open(const std::string &dir_name)
 {
-    tidesdb_err_t *err = tidesdb_open(dir_name, &this->tdb);
+    tidesdb_err_t *err = tidesdb_open(dir_name.c_str(), &this->tdb);
     ERR_HANDLER()
 }
 
@@ -51,71 +52,82 @@ int DB::Close() const
     tidesdb_err_t *err = tidesdb_close(this->tdb);
     ERR_HANDLER()
 }
-int DB::CreateColumnFamily(const char *column_family_name, int flush_threshold, int max_level,
-                           float probability, bool compressed,
+
+int DB::CreateColumnFamily(const std::string &column_family_name, int flush_threshold,
+                           int max_level, float probability, bool compressed,
                            tidesdb_compression_algo_t compress_algo, bool bloom_filter,
                            tidesdb_memtable_ds_t memtable_ds) const
 {
     tidesdb_err_t *err = tidesdb_create_column_family(
-        this->tdb, column_family_name, flush_threshold, max_level, probability, compressed,
+        this->tdb, column_family_name.c_str(), flush_threshold, max_level, probability, compressed,
         compress_algo, bloom_filter, memtable_ds);
     ERR_HANDLER()
 }
 
-int DB::DropColumnFamily(const char *column_family_name) const
+int DB::DropColumnFamily(const std::string &column_family_name) const
 {
-    tidesdb_err_t *err = tidesdb_drop_column_family(this->tdb, column_family_name);
+    tidesdb_err_t *err = tidesdb_drop_column_family(this->tdb, column_family_name.c_str());
     ERR_HANDLER()
 }
 
-int DB::Put(const char *column_family_name, const uint8_t *key, const uint8_t *value,
-            time_t ttl) const
+int DB::Put(const std::string &column_family_name, const std::vector<uint8_t> *key,
+            const std::vector<uint8_t> *value, std::chrono::seconds ttl) const
 {
-    size_t key_size = strlen(reinterpret_cast<const char *>(key));
-    size_t value_size = strlen(reinterpret_cast<const char *>(value));
-    tidesdb_err_t *err =
-        tidesdb_put(this->tdb, column_family_name, key, key_size, value, value_size, ttl);
+    size_t key_size = key->size();
+    size_t value_size = value->size();
+    time_t ttl_time = ttl.count();
+    tidesdb_err_t *err = tidesdb_put(this->tdb, column_family_name.c_str(), key->data(), key_size,
+                                     value->data(), value_size, ttl_time);
     ERR_HANDLER()
 }
 
-int DB::Get(const char *column_family_name, const uint8_t *key, uint8_t **value,
-            size_t &value_size) const
+int DB::Get(const std::string &column_family_name, const std::vector<uint8_t> *key,
+            std::vector<uint8_t> *value) const
 {
-    size_t key_size = strlen(reinterpret_cast<const char *>(key));
-    tidesdb_err_t *err =
-        tidesdb_get(this->tdb, column_family_name, key, key_size, value, &value_size);
+    size_t key_size = key->size();
+    size_t value_size = value->size();
+    uint8_t *value_data = value->data();
+    tidesdb_err_t *err = tidesdb_get(this->tdb, column_family_name.c_str(), key->data(), key_size,
+                                     &value_data, &value_size);
     if (err == nullptr)
     {
-        uint8_t *buf = *value;
-        buf[value_size] = 0;
+        value->resize(value_size);
     }
     ERR_HANDLER()
 }
 
-int DB::Delete(const char *column_family_name, const uint8_t *key) const
+int DB::Delete(const std::string &column_family_name, const std::vector<uint8_t> *key) const
 {
-    size_t key_size = strlen(reinterpret_cast<const char *>(key));
-    tidesdb_err_t *err = tidesdb_delete(this->tdb, column_family_name, key, key_size);
+    size_t key_size = key->size();
+    tidesdb_err_t *err =
+        tidesdb_delete(this->tdb, column_family_name.c_str(), key->data(), key_size);
     ERR_HANDLER()
 }
 
-int DB::CompactSSTables(const char *column_family_name, int max_threads) const
+int DB::CompactSSTables(const std::string &column_family_name, int max_threads) const
 {
-    tidesdb_err_t *err = tidesdb_compact_sstables(this->tdb, column_family_name, max_threads);
+    tidesdb_err_t *err =
+        tidesdb_compact_sstables(this->tdb, column_family_name.c_str(), max_threads);
     ERR_HANDLER()
 }
 
-int DB::StartBackgroundPartialMerges(const char *column_family_name, int seconds,
-                                     int min_sstables) const
+int DB::StartBackgroundPartialMerges(const std::string &column_family_name,
+                                     std::chrono::seconds seconds, int min_sstables) const
 {
-    tidesdb_err_t *err = tidesdb_start_background_partial_merge(this->tdb, column_family_name,
-                                                                seconds, min_sstables);
+    auto duration = seconds.count();
+    if (duration > std::numeric_limits<int>::max() || duration < std::numeric_limits<int>::min())
+    {
+        return -1;
+    }
+
+    tidesdb_err_t *err = tidesdb_start_background_partial_merge(
+        this->tdb, column_family_name.c_str(), static_cast<int>(duration), min_sstables);
     ERR_HANDLER()
 }
 
-Txn::Txn(tidesdb_t *tdb)
+Txn::Txn(DB *db)
 {
-    this->tdb = tdb;
+    this->tdb = db->GetTidesDB();
     this->txn = nullptr;
 }
 
@@ -133,16 +145,18 @@ int Txn::Begin()
     ERR_HANDLER()
 }
 
-int Txn::Put(const uint8_t *key, size_t key_size, const uint8_t *value, size_t value_size,
-             time_t ttl) const
+int Txn::Put(const std::vector<uint8_t> *key, const std::vector<uint8_t> *value,
+             std::chrono::seconds ttl) const
 {
-    tidesdb_err_t *err = tidesdb_txn_put(this->txn, key, key_size, value, value_size, ttl);
+    time_t ttl_time = ttl.count();
+    tidesdb_err_t *err = tidesdb_txn_put(this->txn, key->data(), size_t(key->size), value->data(),
+                                         size_t(value->size), ttl_time);
     ERR_HANDLER()
 }
 
-int Txn::Delete(const uint8_t *key, size_t key_size) const
+int Txn::Delete(const std::vector<uint8_t> *key) const
 {
-    tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key, key_size);
+    tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key->data(), size_t(key->size));
     ERR_HANDLER()
 }
 
@@ -158,24 +172,21 @@ int Txn::Rollback() const
     ERR_HANDLER()
 }
 
-Cursor::Cursor(tidesdb_t *tdb, const char *column_family_name)
+Cursor::Cursor(DB *db, std::string column_family_name)
 {
-    this->tdb = tdb;
+    this->tdb = db->GetTidesDB();
     this->cursor = nullptr;
-    this->column_family_name = strdup(column_family_name);
+    this->column_family_name = std::move(column_family_name);
 }
 
 int Cursor::Init()
 {
-    tidesdb_err_t *err = tidesdb_cursor_init(tdb, this->column_family_name, &this->cursor);
+    tidesdb_err_t *err = tidesdb_cursor_init(tdb, this->column_family_name.c_str(), &this->cursor);
     ERR_HANDLER()
 }
 
 Cursor::~Cursor()
 {
-    // free column_family_name
-    free(this->column_family_name);
-
     // free the cursor
     if (this->cursor)
     {
@@ -195,9 +206,14 @@ int Cursor::Prev() const
     ERR_HANDLER()
 }
 
-int Cursor::Get(uint8_t **key, size_t *key_size, uint8_t **value, size_t *value_size) const
+int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)
 {
-    tidesdb_err_t *err = tidesdb_cursor_get(this->cursor, key, key_size, value, value_size);
+    size_t key_size = key.size();
+    size_t value_size = value.size();
+    uint8_t *key_data = key.data();
+    uint8_t *value_data = value.data();
+    tidesdb_err_t *err =
+        tidesdb_cursor_get(this->cursor, &key_data, &key_size, &value_data, &value_size);
     ERR_HANDLER()
 }
 
