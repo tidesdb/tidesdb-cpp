@@ -71,21 +71,20 @@ class DB
      * Put
      * Puts a key-value pair into a column family.
      */
-    int DB::Put(const std::string &column_family_name, const std::vector<uint8_t> *key,
-                const std::vector<uint8_t> *value, std::chrono::seconds ttl) const;
-
+    int Put(const std::string &column_family_name, const std::vector<uint8_t> *key,
+            const std::vector<uint8_t> *value, std::chrono::seconds ttl) const;
     /*
      * Get
      * Gets a value by key from a column family.
      */
-    int DB::Get(const std::string &column_family_name, const std::vector<uint8_t> *key,
-                std::vector<uint8_t> *value) const;
+    int Get(const std::string &column_family_name, const std::vector<uint8_t> *key,
+            std::vector<uint8_t> *value) const;
 
     /*
      * Delete
      * Deletes a key-value pair from a column family.
      */
-    int DB::Delete(const std::string &column_family_name, const std::vector<uint8_t> *key) const;
+    int Delete(const std::string &column_family_name, const std::vector<uint8_t> *key) const;
 
     /*
      * CompactSSTables

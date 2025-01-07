@@ -148,15 +148,15 @@ int Txn::Begin()
 int Txn::Put(const std::vector<uint8_t> *key, const std::vector<uint8_t> *value,
              std::chrono::seconds ttl) const
 {
-    time_t ttl_time = ttl.count();
-    tidesdb_err_t *err = tidesdb_txn_put(this->txn, key->data(), size_t(key->size), value->data(),
-                                         size_t(value->size), ttl_time);
+    auto ttl_time = std::chrono::duration_cast<std::chrono::seconds>(ttl).count();
+    tidesdb_err_t *err = tidesdb_txn_put(this->txn, key->data(), size_t(key->size()), value->data(),
+                                         size_t(value->size()), ttl_time);
     ERR_HANDLER()
 }
 
 int Txn::Delete(const std::vector<uint8_t> *key) const
 {
-    tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key->data(), size_t(key->size));
+    tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key->data(), size_t(key->size()));
     ERR_HANDLER()
 }
 
