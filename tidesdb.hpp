@@ -18,8 +18,7 @@
  */
 
 #pragma once
-#include <tidesdb.h>
-
+#include <tidesdb/tidesdb.h>
 #include <chrono>
 #include <vector>
 

@@ -17,7 +17,6 @@
  * limitations under the License.
  */
 #include "tidesdb.hpp"
-#include <tidesdb/tidesdb.h>
 #include <iostream>
 #include <utility>
 
