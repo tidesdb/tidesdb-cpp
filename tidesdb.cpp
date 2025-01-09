@@ -17,8 +17,6 @@
  * limitations under the License.
  */
 #include "tidesdb.hpp"
-#include <iostream>
-#include <utility>
 
 #define ERR_HANDLER()                           \
     if (err)                                    \
