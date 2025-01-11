@@ -18,11 +18,12 @@
  */
 
 #pragma once
+#include <tidesdb/tidesdb.h>
+
+#include <chrono>
 #include <iostream>
 #include <utility>
-#include <chrono>
 #include <vector>
-#include <tidesdb/tidesdb.h>
 
 /*
  * TidesDB Namespace
