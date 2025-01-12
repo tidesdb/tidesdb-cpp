@@ -6,11 +6,9 @@ You must make sure you have the TidesDB shared C library installed on your syste
 
 ### Build and install
 ```
-mkdir build
-cd build
-cmake ..
-cmake --build .
-sudo cmake --install .
+cmake -S . -B build
+cmake --build build
+cmake --install build
 ```
 
 ### Create a TidesDB instance
