@@ -26,29 +26,28 @@ DB::DB(void)
     tdb = nullptr;
 }
 
-int DB::Open(const std::string &dir_name)
+static void inline err_handler(tidesdb_err_t *err)
 {
-    tidesdb_err_t *err = tidesdb_open(dir_name.c_str(), &this->tdb);
     if (err)
     {
         std::string error_message = err->message;
-        int error_code = err->code;
+        const int error_code = err->code;
         tidesdb_err_free(err);
         throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
     }
+}
+
+int DB::Open(const std::string &dir_name)
+{
+    tidesdb_err_t *err = tidesdb_open(dir_name.c_str(), &this->tdb);
+    err_handler(err);
     return 0;
 }
 
 int DB::Close() const
 {
     tidesdb_err_t *err = tidesdb_close(this->tdb);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -60,26 +59,14 @@ int DB::CreateColumnFamily(const std::string &column_family_name, int flush_thre
     tidesdb_err_t *err = tidesdb_create_column_family(
         this->tdb, column_family_name.c_str(), flush_threshold, max_level, probability, compressed,
         compress_algo, bloom_filter, memtable_ds);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
 int DB::DropColumnFamily(const std::string &column_family_name) const
 {
     tidesdb_err_t *err = tidesdb_drop_column_family(this->tdb, column_family_name.c_str());
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -91,13 +78,7 @@ int DB::Put(const std::string &column_family_name, const std::vector<uint8_t> *k
     time_t ttl_time = ttl.count();
     tidesdb_err_t *err = tidesdb_put(this->tdb, column_family_name.c_str(), key->data(), key_size,
                                      value->data(), value_size, ttl_time);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -114,13 +95,7 @@ int DB::Get(const std::string &column_family_name, const std::vector<uint8_t> *k
         value->assign(value_data, value_data + value_size);
         free(value_data);
     }
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -129,13 +104,7 @@ int DB::Delete(const std::string &column_family_name, const std::vector<uint8_t>
     size_t key_size = key->size();
     tidesdb_err_t *err =
         tidesdb_delete(this->tdb, column_family_name.c_str(), key->data(), key_size);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -143,13 +112,7 @@ int DB::CompactSSTables(const std::string &column_family_name, int max_threads) 
 {
     tidesdb_err_t *err =
         tidesdb_compact_sstables(this->tdb, column_family_name.c_str(), max_threads);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -164,13 +127,7 @@ int DB::StartBackgroundPartialMerges(const std::string &column_family_name,
 
     tidesdb_err_t *err = tidesdb_start_background_partial_merge(
         this->tdb, column_family_name.c_str(), static_cast<int>(duration), min_sstables);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -191,13 +148,7 @@ Txn::~Txn()
 int Txn::Begin()
 {
     tidesdb_err_t *err = tidesdb_txn_begin(this->tdb, &this->txn, nullptr);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -207,39 +158,21 @@ int Txn::Put(const std::vector<uint8_t> *key, const std::vector<uint8_t> *value,
     auto ttl_time = std::chrono::duration_cast<std::chrono::seconds>(ttl).count();
     tidesdb_err_t *err = tidesdb_txn_put(this->txn, key->data(), size_t(key->size()), value->data(),
                                          size_t(value->size()), ttl_time);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
 int Txn::Delete(const std::vector<uint8_t> *key) const
 {
     tidesdb_err_t *err = tidesdb_txn_delete(this->txn, key->data(), size_t(key->size()));
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
 int Txn::Commit() const
 {
     tidesdb_err_t *err = tidesdb_txn_commit(this->txn);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -266,13 +199,7 @@ Cursor::Cursor(DB *db, std::string column_family_name)
 int Cursor::Init()
 {
     tidesdb_err_t *err = tidesdb_cursor_init(tdb, this->column_family_name.c_str(), &this->cursor);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -288,26 +215,14 @@ Cursor::~Cursor()
 int Cursor::Next() const
 {
     tidesdb_err_t *err = tidesdb_cursor_next(this->cursor);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
 int Cursor::Prev() const
 {
     tidesdb_err_t *err = tidesdb_cursor_prev(this->cursor);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
@@ -319,13 +234,7 @@ int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)
     uint8_t *value_data = value.data();
     tidesdb_err_t *err =
         tidesdb_cursor_get(this->cursor, &key_data, &key_size, &value_data, &value_size);
-    if (err)
-    {
-        std::string error_message = err->message;
-        int error_code = err->code;
-        tidesdb_err_free(err);
-        throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
-    }
+    err_handler(err);
     return 0;
 }
 
