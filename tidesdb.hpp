@@ -60,8 +60,7 @@ class DB
     [[nodiscard]] int CreateColumnFamily(const std::string &name, int flush_threshold,
                                          int max_level, float probability, bool compressed,
                                          tidesdb_compression_algo_t compress_algo,
-                                         bool bloom_filter,
-                                         tidesdb_memtable_ds_t memtable_ds) const;
+                                         bool bloom_filter) const;
 
     /*
      * DropColumnFamily
@@ -95,12 +94,11 @@ class DB
     [[nodiscard]] int CompactSSTables(const std::string &column_family_name, int max_threads) const;
 
     /*
-     * StartBackgroundPartialMerges
-     * starts background partial merges for a column family.
+     * StartIncrementalMerges
+     * starts background incremental merges for a column family.
      */
-    [[nodiscard]] int StartBackgroundPartialMerges(const std::string &column_family_name,
-                                                   std::chrono::seconds seconds,
-                                                   int min_sstables) const;
+    [[nodiscard]] int StartIncrementalMerges(const std::string &column_family_name,
+                                             std::chrono::seconds seconds, int min_sstables) const;
 
     [[nodiscard]] tidesdb_t *GetTidesDB() const;
 
@@ -141,6 +139,12 @@ class Txn
     /*
      * Get
      * gets a value by key from a column family.
+     */
+    int Get(const std::vector<uint8_t> *key, std::vector<uint8_t> *value) const;
+
+    /*
+     * Delete
+     * deletes a key-value pair from a column family.
      */
     [[nodiscard]] int Delete(const std::vector<uint8_t> *key) const;
 
@@ -197,7 +201,7 @@ class Cursor
      * Get
      * gets the current key-value pair in the column family cursor.
      */
-    [[nodiscard]] int Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value);
+    [[nodiscard]] int Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)const;
 };
 
 };  // namespace TidesDB

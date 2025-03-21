@@ -28,7 +28,7 @@ int main() {
 
 ### Creating and dropping column families
 ```cpp
-db.CreateColumnFamily("my_column_family", (1024*1024)*64, TDB_DEFAULT_SKIP_LIST_MAX_LEVEL, TDB_DEFAULT_SKIP_LIST_PROBABILITY, true, TIDESDB_COMPRESSION_LZ4, true, TIDESDB_MEMTABLE_SKIPLIST);
+db.CreateColumnFamily("my_column_family", (1024*1024)*64, TDB_DEFAULT_SKIP_LIST_MAX_LEVEL, TDB_DEFAULT_SKIP_LIST_PROBABILITY, true, TIDESDB_COMPRESSION_LZ4, true);
 db.DropColumnFamily("my_column_family");
 ```
 
@@ -97,7 +97,7 @@ You can manually trigger a compaction.
 db.CompactSSTables("my_column_family", 4); // Use 4 threads for compaction
 ```
 
-Or you can start partial background merge compactions.
+Or you can start incremental background merge compactions.
 ```cpp
-db.StartBackgroundPartialMerges("my_column_family", std::chrono::seconds(60), 5); // Merge every 60 seconds if there are at least 5 SSTables
+db.StartIncrementalMerges("my_column_family", std::chrono::seconds(60), 5); // Merge every 60 seconds if there are at least 5 SSTables
 ```

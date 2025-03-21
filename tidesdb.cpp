@@ -53,12 +53,11 @@ int DB::Close() const
 
 int DB::CreateColumnFamily(const std::string &column_family_name, int flush_threshold,
                            int max_level, float probability, bool compressed,
-                           tidesdb_compression_algo_t compress_algo, bool bloom_filter,
-                           tidesdb_memtable_ds_t memtable_ds) const
+                           tidesdb_compression_algo_t compress_algo, bool bloom_filter) const
 {
-    tidesdb_err_t *err = tidesdb_create_column_family(
-        this->tdb, column_family_name.c_str(), flush_threshold, max_level, probability, compressed,
-        compress_algo, bloom_filter, memtable_ds);
+    tidesdb_err_t *err = tidesdb_create_column_family(this->tdb, column_family_name.c_str(),
+                                                      flush_threshold, max_level, probability,
+                                                      compressed, compress_algo, bloom_filter);
     err_handler(err);
     return 0;
 }
@@ -116,8 +115,8 @@ int DB::CompactSSTables(const std::string &column_family_name, int max_threads) 
     return 0;
 }
 
-int DB::StartBackgroundPartialMerges(const std::string &column_family_name,
-                                     std::chrono::seconds seconds, int min_sstables) const
+int DB::StartIncrementalMerges(const std::string &column_family_name, std::chrono::seconds seconds,
+                               int min_sstables) const
 {
     auto duration = seconds.count();
     if (duration > std::numeric_limits<int>::max() || duration < std::numeric_limits<int>::min())
@@ -125,8 +124,8 @@ int DB::StartBackgroundPartialMerges(const std::string &column_family_name,
         return -1;
     }
 
-    tidesdb_err_t *err = tidesdb_start_background_partial_merge(
-        this->tdb, column_family_name.c_str(), static_cast<int>(duration), min_sstables);
+    tidesdb_err_t *err = tidesdb_start_incremental_merge(this->tdb, column_family_name.c_str(),
+                                                         static_cast<int>(duration), min_sstables);
     err_handler(err);
     return 0;
 }
@@ -148,6 +147,22 @@ Txn::~Txn()
 int Txn::Begin()
 {
     tidesdb_err_t *err = tidesdb_txn_begin(this->tdb, &this->txn, nullptr);
+    err_handler(err);
+    return 0;
+}
+
+int Txn::Get(const std::vector<uint8_t> *key, std::vector<uint8_t> *value) const
+{
+    size_t key_size = key->size();
+    unsigned char *value_data = nullptr;
+    unsigned long value_size = 0;
+    tidesdb_err_t *err =
+        tidesdb_txn_get(this->txn, key->data(), key_size, &value_data, &value_size);
+    if (err == nullptr)
+    {
+        value->assign(value_data, value_data + value_size);
+        free(value_data);
+    }
     err_handler(err);
     return 0;
 }
@@ -226,7 +241,7 @@ int Cursor::Prev() const
     return 0;
 }
 
-int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)
+int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)const
 {
     size_t key_size = key.size();
     size_t value_size = value.size();
