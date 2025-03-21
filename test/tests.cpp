@@ -23,11 +23,10 @@
 std::string column_name = "my_db";
 const int flush_threshold = (1024 * 1024) * 128;
 const tidesdb_compression_algo_t compression_algo = TDB_COMPRESS_SNAPPY;
-const float probability = TDB_USING_HT_PROBABILITY;
-const int max_level = TDB_USING_HT_MAX_LEVEL;
+const float probability = TDB_DEFAULT_SKIP_LIST_PROBABILITY;
+const int max_level = TDB_DEFAULT_SKIP_LIST_MAX_LEVEL;
 const bool bloom_filter = true;
 const bool compressed = true;
-const tidesdb_memtable_ds_t memtable_ds = TDB_MEMTABLE_HASH_TABLE;
 
 TEST(TidesDB, Open_and_Close)
 {
@@ -41,7 +40,7 @@ TEST(TidesDB, Create_and_Drop_Column_Family)
     TidesDB::DB db;
     EXPECT_EQ(db.Open("tmp"), 0);
     EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
-                                    compressed, compression_algo, bloom_filter, memtable_ds),
+                                    compressed, compression_algo, bloom_filter),
               0);
     EXPECT_EQ(db.DropColumnFamily(column_name), 0);
     EXPECT_EQ(db.Close(), 0);
@@ -53,7 +52,7 @@ TEST(TidesDB, Create_and_Column_Family_and_Put)
     TidesDB::DB db;
     EXPECT_EQ(db.Open("tmp"), 0);
     EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
-                                    compressed, compression_algo, bloom_filter, memtable_ds),
+                                    compressed, compression_algo, bloom_filter),
               0);
     const std::vector<uint8_t> key = {'k', 'e', 'y'};
     const std::vector<uint8_t> value = {'v', 'a', 'l', 'u', 'e'};
@@ -69,7 +68,7 @@ TEST(TidesDB, Put_and_Get)
     std::vector<uint8_t> got_value;
     EXPECT_EQ(db.Open("tmp"), 0);
     EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
-                                    compressed, compression_algo, bloom_filter, memtable_ds),
+                                    compressed, compression_algo, bloom_filter),
               0);
 
     const std::vector<uint8_t> key = {'k', 'e', 'y'};
@@ -90,7 +89,7 @@ TEST(TidesDB, Put_and_Delete)
 
     EXPECT_EQ(db.Open("tmp"), 0);
     EXPECT_EQ(db.CreateColumnFamily(column_name, flush_threshold, max_level, probability,
-                                    compressed, compression_algo, true, memtable_ds),
+                                    compressed, compression_algo, true),
               0);
     const std::vector<uint8_t> key = {'k', 'e', 'y'};
     const std::vector<uint8_t> value = {'v', 'a', 'l', 'u', 'e'};
