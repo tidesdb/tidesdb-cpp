@@ -33,6 +33,48 @@ namespace TidesDB
 {
 
 /*
+ * SSTableStat Struct
+ * represents statistics about an SSTable.
+ */
+struct SSTableStat
+{
+    std::string path;
+    size_t size;
+    size_t num_blocks;
+};
+
+/*
+ * ColumnFamilyConfig Struct
+ * represents configuration for a column family.
+ */
+struct ColumnFamilyConfig
+{
+    std::string name;
+    int32_t flush_threshold;
+    int32_t max_level;
+    float probability;
+    bool compressed;
+    tidesdb_compression_algo_t compress_algo;
+    bool bloom_filter;
+};
+
+/*
+ * ColumnFamilyStat Class
+ * represents statistics about a column family.
+ */
+class ColumnFamilyStat
+{
+   public:
+    std::string name;
+    int num_sstables;
+    size_t memtable_size;
+    size_t memtable_entries_count;
+    bool incremental_merging;
+    ColumnFamilyConfig config;
+    std::vector<SSTableStat> sstable_stats;
+};
+
+/*
  * DB Class
  * represents TidesDB database.
  */
@@ -82,6 +124,33 @@ class DB
             std::vector<uint8_t> *value) const;
 
     /*
+     * Range
+     * Gets a range of key-value pairs from a column family.
+     */
+    int Range(const std::string &column_family_name, const std::vector<uint8_t> *start_key,
+              const std::vector<uint8_t> *end_key,
+              std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> *result) const;
+
+    /*
+     * ListColumnFamilies
+     * Lists the column families in the database.
+     */
+    int ListColumnFamilies(std::vector<std::string> *families) const;
+
+    /*
+     * DeleteByRange
+     * Deletes a range of key-value pairs from a column family.
+     */
+    int DeleteByRange(const std::string &column_family_name, const std::vector<uint8_t> *start_key,
+                      const std::vector<uint8_t> *end_key) const;
+
+    /*
+     * GetColumnFamilyStat
+     * Gets statistics about a column family.
+     */
+    int GetColumnFamilyStat(const std::string &column_family_name, ColumnFamilyStat *stat) const;
+
+    /*
      * Delete
      * Deletes a key-value pair from a column family.
      */
@@ -120,7 +189,7 @@ class Txn
      * Txn
      * creates a new transaction for a database.
      */
-    explicit Txn(DB *db);
+    explicit Txn(const DB *db);
     ~Txn();
 
     /*
@@ -176,7 +245,7 @@ class Cursor
      * Cursor
      * creates a new cursor for a column family.
      */
-    Cursor(DB *db, std::string column_family_name);
+    Cursor(const DB *db, std::string column_family_name);
     ~Cursor();
 
     /*
@@ -201,7 +270,7 @@ class Cursor
      * Get
      * gets the current key-value pair in the column family cursor.
      */
-    [[nodiscard]] int Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)const;
+    [[nodiscard]] int Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value) const;
 };
 
-};  // namespace TidesDB
+};  /* namespace TidesDB */

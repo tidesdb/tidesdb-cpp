@@ -21,7 +21,7 @@
 namespace TidesDB
 {
 
-DB::DB(void)
+DB::DB()
 {
     tdb = nullptr;
 }
@@ -130,7 +130,126 @@ int DB::StartIncrementalMerges(const std::string &column_family_name, std::chron
     return 0;
 }
 
-Txn::Txn(DB *db)
+int DB::Range(const std::string &column_family_name, const std::vector<uint8_t> *start_key,
+             const std::vector<uint8_t> *end_key, std::vector<std::pair<std::vector<uint8_t>,
+             std::vector<uint8_t>>> *result) const
+{
+    size_t start_key_size = start_key->size();
+    size_t end_key_size = end_key->size();
+    tidesdb_key_value_pair_t **c_result = nullptr;
+    size_t result_size = 0;
+
+    tidesdb_err_t *err = tidesdb_range(this->tdb, column_family_name.c_str(),
+                                      start_key->data(), start_key_size,
+                                      end_key->data(), end_key_size,
+                                      &c_result, &result_size);
+
+    if (err == nullptr && c_result != nullptr)
+    {
+        result->clear();
+        result->reserve(result_size);
+
+        for (size_t i = 0; i < result_size; i++)
+        {
+            std::vector<uint8_t> key(c_result[i]->key, c_result[i]->key + c_result[i]->key_size);
+            std::vector<uint8_t> value(c_result[i]->value, c_result[i]->value + c_result[i]->value_size);
+            result->emplace_back(key, value);
+
+            (void)_tidesdb_free_key_value_pair(c_result[i]);
+        }
+
+        free(c_result);
+    }
+
+    err_handler(err);
+    return 0;
+}
+
+int DB::ListColumnFamilies(std::vector<std::string> *families) const
+{
+    char *c_list = nullptr;
+
+    tidesdb_err_t *err = tidesdb_list_column_families(this->tdb, &c_list);
+
+    if (err == nullptr && c_list != nullptr)
+    {
+        families->clear();
+
+        /* we parse the comma-separated list */
+        char *token = strtok(c_list, ",");
+        while (token != nullptr)
+        {
+            families->emplace_back(token);
+            token = strtok(nullptr, ",");
+        }
+
+        free(c_list);
+    }
+
+    err_handler(err);
+    return 0;
+}
+
+int DB::DeleteByRange(const std::string &column_family_name, const std::vector<uint8_t> *start_key,
+                     const std::vector<uint8_t> *end_key) const
+{
+    size_t start_key_size = start_key->size();
+    size_t end_key_size = end_key->size();
+
+    tidesdb_err_t *err = tidesdb_delete_by_range(this->tdb, column_family_name.c_str(),
+                                                start_key->data(), start_key_size,
+                                                end_key->data(), end_key_size);
+
+    err_handler(err);
+    return 0;
+}
+
+int DB::GetColumnFamilyStat(const std::string &column_family_name,
+                           ColumnFamilyStat *stat) const
+{
+    tidesdb_column_family_stat_t *c_stat = nullptr;
+
+    tidesdb_err_t *err = tidesdb_get_column_family_stat(this->tdb, column_family_name.c_str(),
+                                                       &c_stat);
+
+    if (err == nullptr && c_stat != nullptr)
+    {
+        /* we convert C stat to C++ stat */
+        stat->name = std::string(c_stat->cf_name);
+        stat->num_sstables = c_stat->num_sstables;
+        stat->memtable_size = c_stat->memtable_size;
+        stat->memtable_entries_count = c_stat->memtable_entries_count;
+        stat->incremental_merging = c_stat->incremental_merging;
+
+        /* we copy configuration */
+        stat->config.name = std::string(c_stat->config.name);
+        stat->config.flush_threshold = c_stat->config.flush_threshold;
+        stat->config.max_level = c_stat->config.max_level;
+        stat->config.probability = c_stat->config.probability;
+        stat->config.compressed = c_stat->config.compressed;
+        stat->config.compress_algo = c_stat->config.compress_algo;
+        stat->config.bloom_filter = c_stat->config.bloom_filter;
+
+        /* we copy sstable stats */
+        stat->sstable_stats.clear();
+        for (int i = 0; i < c_stat->num_sstables; i++)
+        {
+            SSTableStat sstable_stat;
+            sstable_stat.path = std::string(c_stat->sstable_stats[i]->sstable_path);
+            sstable_stat.size = c_stat->sstable_stats[i]->size;
+            sstable_stat.num_blocks = c_stat->sstable_stats[i]->num_blocks;
+            stat->sstable_stats.push_back(sstable_stat);
+        }
+
+        /* we free the memory allocated by the C API */
+        (void)tidesdb_free_column_family_stat(c_stat);
+    }
+
+    err_handler(err);
+    return 0;
+}
+
+Txn::Txn(const DB *db)
 {
     this->tdb = db->GetTidesDB();
     this->txn = nullptr;
@@ -140,7 +259,7 @@ Txn::~Txn()
 {
     if (this->txn)
     {
-        tidesdb_txn_free(this->txn);
+        (void)tidesdb_txn_free(this->txn);
     }
 }
 
@@ -198,13 +317,13 @@ int Txn::Rollback() const
     {
         std::string error_message = err->message;
         int error_code = err->code;
-        tidesdb_err_free(err);
+        (void)tidesdb_err_free(err);
         throw std::runtime_error("Error " + std::to_string(error_code) + ": " + error_message);
     }
     return 0;
 }
 
-Cursor::Cursor(DB *db, std::string column_family_name)
+Cursor::Cursor(const DB *db, std::string column_family_name)
 {
     this->tdb = db->GetTidesDB();
     this->cursor = nullptr;
@@ -220,10 +339,9 @@ int Cursor::Init()
 
 Cursor::~Cursor()
 {
-    // free the cursor
     if (this->cursor)
     {
-        tidesdb_cursor_free(this->cursor);
+        (void)tidesdb_cursor_free(this->cursor);
     }
 }
 
@@ -241,7 +359,7 @@ int Cursor::Prev() const
     return 0;
 }
 
-int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value)const
+int Cursor::Get(std::vector<uint8_t> &key, std::vector<uint8_t> &value) const
 {
     size_t key_size = key.size();
     size_t value_size = value.size();
@@ -258,4 +376,4 @@ tidesdb_t *DB::GetTidesDB() const
     return this->tdb;
 }
 
-}  // namespace TidesDB
+}  /* namespace TidesDB */
