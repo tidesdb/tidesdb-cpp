@@ -2,102 +2,171 @@
 Official C++ binding for TidesDB.
 
 ## Getting Started
-You must make sure you have the TidesDB shared C library installed on your system. Be sure to also compile with TIDESDB_WITH_SANITIZER and TIDESDB_BUILD_TESTS OFF.
+You must make sure you have the TidesDB shared C library installed on your system. Be sure to also compile with TIDESDB_WITH_SANITIZER and TIDESDB_BUILD_TESTS OFF.  You will also require a C++11 compatible compiler.
 
 ### Build and install
-```
+```bash
 cmake -S . -B build
 cmake --build build
 cmake --install build
 ```
 
-### Create a TidesDB instance
+### Linking
+```cmake
+# Find the TidesDB C library
+find_library(LIBRARY_TIDEDB NAMES tidesdb REQUIRED)
+
+# Find the TidesDB C++ binding
+find_library(LIBRARY_TIDEDB_CPP NAMES tidesdb_cpp REQUIRED)
+
+# Link with your target
+target_link_libraries(your_target PRIVATE ${LIBRARY_TIDEDB_CPP} ${LIBRARY_TIDEDB})
+```
+
+
+### Open and Close
 ```cpp
 #include <tidesdb.hpp>
 
 int main() {
     TidesDB::DB db;
-    db.Open("your_db_dir");
+    db.Open("your_db_directory");
 
-    // Perform db operations...
+    /* Database operations... */
 
     db.Close();
     return 0;
 }
 ```
 
-### Creating and dropping column families
+### Column Family Management
 ```cpp
-db.CreateColumnFamily("my_column_family", (1024*1024)*64, TDB_DEFAULT_SKIP_LIST_MAX_LEVEL, TDB_DEFAULT_SKIP_LIST_PROBABILITY, true, TIDESDB_COMPRESSION_LZ4, true);
-db.DropColumnFamily("my_column_family");
+/* Create a column family with custom parameters */
+db.CreateColumnFamily(
+    "users",                           /* Column family name       */
+    64 * 1024 * 1024,                  /* Flush threshold (64MB)   */
+    TDB_DEFAULT_SKIP_LIST_MAX_LEVEL,   /* Max level for skip list  */
+    TDB_DEFAULT_SKIP_LIST_PROBABILITY, /* Skip list probability    */
+    true,                              /* Enable compression       */
+    TIDESDB_COMPRESSION_LZ4,           /* Use LZ4 compression      */
+    true                               /* Enable bloom filter      */
+);
+
+/* List all column families */
+std::vector<std::string> families;
+db.ListColumnFamilies(&families);
+for (const auto& family : families) {
+    std::cout << "Found column family: " << family << std::endl;
+}
+
+/* Get column family statistics */
+TidesDB::ColumnFamilyStat stat;
+db.GetColumnFamilyStat("users", &stat);
+std::cout << "Memtable size: " << stat.memtable_size << " bytes" << std::endl;
+std::cout << "Number of SSTables: " << stat.num_sstables << std::endl;
+
+/* Drop a column family */
+db.DropColumnFamily("users");
 ```
 
-### CRUD operations
-#### No TTL
+### Basic Key-Value Operations
 ```cpp
-std::vector<uint8_t> key = {1, 2, 3};
-std::vector<uint8_t> value = {4, 5, 6};
-db.Put("my_column_family", &key, &value, -1);
-```
+/* Create binary key and value */
+std::vector<uint8_t> key = {1, 2, 3, 4};
+std::vector<uint8_t> value = {10, 20, 30, 40};
 
-#### With TTL
-```cpp
-std::vector<uint8_t> key = {1, 2, 3};
-std::vector<uint8_t> value = {4, 5, 6};
-db.Put("my_column_family", &key, &value, std::chrono::seconds(3600));
-```
+/* Insert with no TTL */
+db.Put("users", &key, &value, std::chrono::seconds(0));
 
-#### Get
-```cpp
+/* Insert with 1 hour TTL */
+db.Put("users", &key, &value, std::chrono::seconds(3600));
+
+/* Retrieve a value */
 std::vector<uint8_t> retrieved_value;
-db.Get("my_column_family", &key, &retrieved_value);
+db.Get("users", &key, &retrieved_value);
+
+/* Delete a key */
+db.Delete("users", &key);
 ```
 
-#### Deleting data
+### Range Queries
 ```cpp
-db.Delete("my_column_family", &key);
+std::vector<uint8_t> start_key = {1, 0, 0};
+std::vector<uint8_t> end_key = {1, 255, 255};
+std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> results;
+
+db.Range("users", &start_key, &end_key, &results);
+
+for (const auto& [k, v] : results) {
+    /* Process key-value pairs.... */
+}
+
+/* Delete a range of keys */
+db.DeleteByRange("users", &start_key, &end_key);
 ```
 
-## Transactions
-You can add operations to a transaction and commit them atomically.
+### Transactions
 ```cpp
 TidesDB::Txn txn(&db);
 txn.Begin();
-txn.Put(&key, &value, std::chrono::seconds(3600));
+
+/* Perform multiple operations atomically */
+std::vector<uint8_t> key1 = {1, 1};
+std::vector<uint8_t> value1 = {10, 10};
+txn.Put(&key1, &value1, std::chrono::seconds(0));
+
+std::vector<uint8_t> key2 = {2, 2};
+std::vector<uint8_t> value2 = {20, 20};
+txn.Put(&key2, &value2, std::chrono::seconds(0));
+
+/* Read within the transaction */
+std::vector<uint8_t> read_value;
+txn.Get(&key1, &read_value);
+
+/* Delete within the transaction */
+txn.Delete(&key1);
+
+/* Commit the transaction */
 txn.Commit();
+
+/* Or roll back if needed
+ * txn.Rollback(); */
 ```
 
-## Cursor
-You can iterate over the keys in a column family.
+### Cursors
 ```cpp
-TidesDB::Cursor cursor(&db, "my_column_family");
-cursor.Init();
-
-std::vector<uint8_t> key, value;
-cursor.Get(key, value);
-cursor.Next(); // Go forwards
-cursor.Prev(); // Go backwards
-```
-
-```cpp
-TidesDB::Cursor cursor(&db, "my_column_family");
+TidesDB::Cursor cursor(&db, "users");
 cursor.Init();
 
 std::vector<uint8_t> key, value;
 while (cursor.Get(key, value) == 0) {
-    // Process key and value
+    /* Process key and value */
+
+    /* Move to next entry */
     cursor.Next();
+
+    /* Or move to previous entry
+    * cursor.Prev(); */
 }
+
 ```
 
-
-## Compactions
-You can manually trigger a compaction.
+### Compaction Management
 ```cpp
-db.CompactSSTables("my_column_family", 4); // Use 4 threads for compaction
+/* Manual compaction with 4 threads */
+db.CompactSSTables("users", 4);
+
+/* Automated incremental merges (run every 60 seconds if at least 5 SSTables exist) */
+db.StartIncrementalMerges("users", std::chrono::seconds(60), 5);
 ```
 
-Or you can start incremental background merge compactions.
+### Exception Handling Example
 ```cpp
-db.StartIncrementalMerges("my_column_family", std::chrono::seconds(60), 5); // Merge every 60 seconds if there are at least 5 SSTables
+try {
+    db.Open("non_existent_directory");
+} catch (const std::runtime_error& e) {
+    std::cerr << "Database error: " << e.what() << std::endl;
+    /* The error message will contain both the error code and description
+     * Format: "Error {code}: {message}" */
+}
 ```

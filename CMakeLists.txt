@@ -5,7 +5,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(tidesdb_cpp CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 11)
 set(PROJECT_VERSION 0.1.0)
 add_compile_options(-Wextra -Wall -Werror)
 
