@@ -2,7 +2,7 @@
 Official C++ binding for TidesDB.
 
 ## Getting Started
-You must make sure you have the TidesDB shared C library installed on your system. Be sure to also compile with TIDESDB_WITH_SANITIZER and TIDESDB_BUILD_TESTS OFF.  You will also require a C++11 compatible compiler.
+You must make sure you have the TidesDB shared C library installed on your system. Be sure to also compile with `TIDESDB_WITH_SANITIZER` and `TIDESDB_BUILD_TESTS` OFF.  You will also require a **C++11 +** compatible compiler.
 
 ### Build and install
 ```bash
