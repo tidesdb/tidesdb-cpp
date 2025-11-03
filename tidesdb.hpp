@@ -26,6 +26,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cmath>
+#include <complex>
 
 using atomic_size_t = std::atomic<size_t>;
 using atomic_uint64_t = std::atomic<uint64_t>;
