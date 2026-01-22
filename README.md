@@ -16,7 +16,7 @@ TidesDB is a fast and efficient key-value storage engine library written in C. T
 - Savepoints for partial transaction rollback
 - Six built-in comparators plus custom registration
 
-For C++ usage you can go to the TidesDB C++ Reference [here](https://tidesdb.com/reference/cpp/).
+For C++ usage you can go to the TidesDB C++ Reference [here](https://tidesdb.com/reference/cplusplus/).
 
 ## License
 
