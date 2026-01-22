@@ -200,12 +200,18 @@ bool Iterator::valid() const {
 
 void Iterator::next() {
     int result = tidesdb_iter_next(iter_);
-    checkResult(result, "failed to move to next");
+    // TDB_ERR_NOT_FOUND is expected at end of iteration, not an error
+    if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND) {
+        checkResult(result, "failed to move to next");
+    }
 }
 
 void Iterator::prev() {
     int result = tidesdb_iter_prev(iter_);
-    checkResult(result, "failed to move to prev");
+    // TDB_ERR_NOT_FOUND is expected at end of iteration, not an error
+    if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND) {
+        checkResult(result, "failed to move to prev");
+    }
 }
 
 std::vector<std::uint8_t> Iterator::key() const {
