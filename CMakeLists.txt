@@ -1,39 +1,82 @@
-cmake_minimum_required(VERSION 3.25)
-project(tidesdb_cpp CXX)
+cmake_minimum_required(VERSION 3.16)
+project(tidesdb_cpp VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-set(PROJECT_VERSION 1.0.0)
-add_compile_options(-Wextra -Wall -Werror)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_library(LIBRARY_TIDEDB NAMES tidesdb REQUIRED)
+option(TIDESDB_CPP_BUILD_TESTS "Build tests" ON)
 
-# INTERFACE library for header-only
-add_library(tidesdb_cpp INTERFACE)
-
-if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-    target_include_directories(tidesdb_cpp INTERFACE /opt/homebrew/include)
-    target_link_directories(tidesdb_cpp INTERFACE /opt/homebrew/lib)
-elseif(APPLE)
-    target_include_directories(tidesdb_cpp INTERFACE /usr/local/include)
-    target_link_directories(tidesdb_cpp INTERFACE /usr/local/lib)
+# Platform-specific compiler flags
+if(MSVC)
+    add_compile_options(/W4)
+elseif(MINGW)
+    add_compile_options(-Wall -Wextra)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-target_link_libraries(tidesdb_cpp INTERFACE ${LIBRARY_TIDEDB})
+# Find TidesDB library
+find_library(TIDESDB_LIBRARY NAMES tidesdb REQUIRED)
 
-install(FILES tidesdb.hpp DESTINATION include)
-install(TARGETS tidesdb_cpp EXPORT tidesdb_cpp-targets)
+# Create the library
+add_library(tidesdb_cpp STATIC src/tidesdb.cpp)
+add_library(tidesdb::cpp ALIAS tidesdb_cpp)
 
-include(FetchContent)
-FetchContent_Declare(
-        googletest
-        URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+target_include_directories(tidesdb_cpp
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
 )
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
 
-enable_testing()
-add_executable(tests test/tests.cpp)
-target_link_libraries(tests GTest::gtest_main tidesdb_cpp)
+# Platform-specific include/link directories
+if(APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+        target_include_directories(tidesdb_cpp PUBLIC /opt/homebrew/include)
+        target_link_directories(tidesdb_cpp PUBLIC /opt/homebrew/lib)
+    else()
+        target_include_directories(tidesdb_cpp PUBLIC /usr/local/include)
+        target_link_directories(tidesdb_cpp PUBLIC /usr/local/lib)
+    endif()
+elseif(WIN32)
+    if(MINGW)
+        target_include_directories(tidesdb_cpp PUBLIC /mingw64/include)
+        target_link_directories(tidesdb_cpp PUBLIC /mingw64/lib)
+    endif()
+endif()
 
-include(GoogleTest)
-gtest_discover_tests(tests)
+target_link_libraries(tidesdb_cpp PUBLIC ${TIDESDB_LIBRARY})
+
+# Installation
+install(TARGETS tidesdb_cpp
+    EXPORT tidesdb_cpp-targets
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY include/tidesdb DESTINATION include)
+
+install(EXPORT tidesdb_cpp-targets
+    FILE tidesdb_cpp-config.cmake
+    NAMESPACE tidesdb::
+    DESTINATION lib/cmake/tidesdb_cpp
+)
+
+# Tests
+if(TIDESDB_CPP_BUILD_TESTS)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    enable_testing()
+    add_executable(tidesdb_cpp_tests tests/tidesdb_test.cpp)
+    target_link_libraries(tidesdb_cpp_tests PRIVATE GTest::gtest_main tidesdb_cpp)
+
+    include(GoogleTest)
+    gtest_discover_tests(tidesdb_cpp_tests)
+endif()
