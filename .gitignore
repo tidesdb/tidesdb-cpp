@@ -1,15 +1,10 @@
-# Build directories
 build/
 cmake-build-*/
-
-# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
-# Compiled files
 *.o
 *.obj
 *.a
@@ -17,18 +12,12 @@ cmake-build-*/
 *.so
 *.dylib
 *.dll
-
-# Test databases
 testdb*/
 example_db/
-
-# CMake
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
 *.cmake
 !CMakeLists.txt
-
-# GoogleTest
 _deps/
