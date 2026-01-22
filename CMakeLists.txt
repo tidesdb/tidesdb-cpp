@@ -16,8 +16,14 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Find TidesDB library
 find_library(TIDESDB_LIBRARY NAMES tidesdb REQUIRED)
+
+if(WIN32)
+    find_package(zstd CONFIG REQUIRED)
+    find_package(Snappy CONFIG REQUIRED)
+    find_package(lz4 CONFIG REQUIRED)
+    find_package(PThreads4W REQUIRED)
+endif()
 
 # Create the library
 add_library(tidesdb_cpp STATIC src/tidesdb.cpp)
@@ -29,7 +35,7 @@ target_include_directories(tidesdb_cpp
         $<INSTALL_INTERFACE:include>
 )
 
-# Platform-specific include/link directories
+# Platform-specific include/link directories and libraries
 if(APPLE)
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
         target_include_directories(tidesdb_cpp PUBLIC /opt/homebrew/include)
@@ -38,14 +44,24 @@ if(APPLE)
         target_include_directories(tidesdb_cpp PUBLIC /usr/local/include)
         target_link_directories(tidesdb_cpp PUBLIC /usr/local/lib)
     endif()
+    target_link_libraries(tidesdb_cpp PUBLIC ${TIDESDB_LIBRARY})
 elseif(WIN32)
     if(MINGW)
         target_include_directories(tidesdb_cpp PUBLIC /mingw64/include)
         target_link_directories(tidesdb_cpp PUBLIC /mingw64/lib)
     endif()
+    # Link TidesDB and its dependencies (static library needs explicit deps)
+    target_link_libraries(tidesdb_cpp PUBLIC
+        ${TIDESDB_LIBRARY}
+        $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
+        Snappy::snappy
+        lz4::lz4
+        PThreads4W::PThreads4W
+    )
+else()
+    # Linux and other Unix
+    target_link_libraries(tidesdb_cpp PUBLIC ${TIDESDB_LIBRARY})
 endif()
-
-target_link_libraries(tidesdb_cpp PUBLIC ${TIDESDB_LIBRARY})
 
 # Installation
 install(TARGETS tidesdb_cpp
