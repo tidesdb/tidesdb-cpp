@@ -20,27 +20,32 @@
 #include <cstring>
 #include <utility>
 
-namespace tidesdb {
+namespace tidesdb
+{
 
-namespace {
+namespace
+{
 
-void checkResult(int result, const std::string& context) {
-    if (result != TDB_SUCCESS) {
+void checkResult(int result, const std::string& context)
+{
+    if (result != TDB_SUCCESS)
+    {
         throw Exception(static_cast<ErrorCode>(result),
                         context + ": " + Exception::errorMessage(result) +
-                        " (code: " + std::to_string(result) + ")");
+                            " (code: " + std::to_string(result) + ")");
     }
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 //-----------------------------------------------------------------------------
 // ColumnFamilyConfig
 //-----------------------------------------------------------------------------
 
-ColumnFamilyConfig ColumnFamilyConfig::defaultConfig() {
+ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
+{
     tidesdb_column_family_config_t cConfig = tidesdb_default_column_family_config();
-    
+
     ColumnFamilyConfig config;
     config.writeBufferSize = cConfig.write_buffer_size;
     config.levelSizeRatio = cConfig.level_size_ratio;
@@ -62,7 +67,7 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig() {
     config.minDiskSpace = cConfig.min_disk_space;
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
-    
+
     return config;
 }
 
@@ -70,19 +75,23 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig() {
 // ColumnFamily
 //-----------------------------------------------------------------------------
 
-ColumnFamily::ColumnFamily(ColumnFamily&& other) noexcept : cf_(other.cf_) {
+ColumnFamily::ColumnFamily(ColumnFamily&& other) noexcept : cf_(other.cf_)
+{
     other.cf_ = nullptr;
 }
 
-ColumnFamily& ColumnFamily::operator=(ColumnFamily&& other) noexcept {
-    if (this != &other) {
+ColumnFamily& ColumnFamily::operator=(ColumnFamily&& other) noexcept
+{
+    if (this != &other)
+    {
         cf_ = other.cf_;
         other.cf_ = nullptr;
     }
     return *this;
 }
 
-Stats ColumnFamily::getStats() const {
+Stats ColumnFamily::getStats() const
+{
     tidesdb_stats_t* cStats = nullptr;
     int result = tidesdb_get_stats(cf_, &cStats);
     checkResult(result, "failed to get stats");
@@ -91,28 +100,34 @@ Stats ColumnFamily::getStats() const {
     stats.numLevels = cStats->num_levels;
     stats.memtableSize = cStats->memtable_size;
 
-    if (cStats->num_levels > 0 && cStats->level_sizes != nullptr) {
+    if (cStats->num_levels > 0 && cStats->level_sizes != nullptr)
+    {
         stats.levelSizes.resize(cStats->num_levels);
-        for (int i = 0; i < cStats->num_levels; ++i) {
+        for (int i = 0; i < cStats->num_levels; ++i)
+        {
             stats.levelSizes[i] = cStats->level_sizes[i];
         }
     }
 
-    if (cStats->num_levels > 0 && cStats->level_num_sstables != nullptr) {
+    if (cStats->num_levels > 0 && cStats->level_num_sstables != nullptr)
+    {
         stats.levelNumSSTables.resize(cStats->num_levels);
-        for (int i = 0; i < cStats->num_levels; ++i) {
+        for (int i = 0; i < cStats->num_levels; ++i)
+        {
             stats.levelNumSSTables[i] = cStats->level_num_sstables[i];
         }
     }
 
-    if (cStats->config != nullptr) {
+    if (cStats->config != nullptr)
+    {
         ColumnFamilyConfig cfConfig;
         cfConfig.writeBufferSize = cStats->config->write_buffer_size;
         cfConfig.levelSizeRatio = cStats->config->level_size_ratio;
         cfConfig.minLevels = cStats->config->min_levels;
         cfConfig.dividingLevelOffset = cStats->config->dividing_level_offset;
         cfConfig.klogValueThreshold = cStats->config->klog_value_threshold;
-        cfConfig.compressionAlgorithm = static_cast<CompressionAlgorithm>(cStats->config->compression_algo);
+        cfConfig.compressionAlgorithm =
+            static_cast<CompressionAlgorithm>(cStats->config->compression_algo);
         cfConfig.enableBloomFilter = cStats->config->enable_bloom_filter != 0;
         cfConfig.bloomFPR = cStats->config->bloom_fpr;
         cfConfig.enableBlockIndexes = cStats->config->enable_block_indexes != 0;
@@ -123,7 +138,8 @@ Stats ColumnFamily::getStats() const {
         cfConfig.comparatorName = cStats->config->comparator_name;
         cfConfig.skipListMaxLevel = cStats->config->skip_list_max_level;
         cfConfig.skipListProbability = cStats->config->skip_list_probability;
-        cfConfig.defaultIsolationLevel = static_cast<IsolationLevel>(cStats->config->default_isolation_level);
+        cfConfig.defaultIsolationLevel =
+            static_cast<IsolationLevel>(cStats->config->default_isolation_level);
         cfConfig.minDiskSpace = cStats->config->min_disk_space;
         cfConfig.l1FileCountTrigger = cStats->config->l1_file_count_trigger;
         cfConfig.l0QueueStallThreshold = cStats->config->l0_queue_stall_threshold;
@@ -134,12 +150,14 @@ Stats ColumnFamily::getStats() const {
     return stats;
 }
 
-void ColumnFamily::compact() {
+void ColumnFamily::compact()
+{
     int result = tidesdb_compact(cf_);
     checkResult(result, "failed to compact column family");
 }
 
-void ColumnFamily::flushMemtable() {
+void ColumnFamily::flushMemtable()
+{
     int result = tidesdb_flush_memtable(cf_);
     checkResult(result, "failed to flush memtable");
 }
@@ -148,13 +166,17 @@ void ColumnFamily::flushMemtable() {
 // Iterator
 //-----------------------------------------------------------------------------
 
-Iterator::Iterator(Iterator&& other) noexcept : iter_(other.iter_) {
+Iterator::Iterator(Iterator&& other) noexcept : iter_(other.iter_)
+{
     other.iter_ = nullptr;
 }
 
-Iterator& Iterator::operator=(Iterator&& other) noexcept {
-    if (this != &other) {
-        if (iter_ != nullptr) {
+Iterator& Iterator::operator=(Iterator&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (iter_ != nullptr)
+        {
             tidesdb_iter_free(iter_);
         }
         iter_ = other.iter_;
@@ -163,58 +185,67 @@ Iterator& Iterator::operator=(Iterator&& other) noexcept {
     return *this;
 }
 
-Iterator::~Iterator() {
-    if (iter_ != nullptr) {
+Iterator::~Iterator()
+{
+    if (iter_ != nullptr)
+    {
         tidesdb_iter_free(iter_);
         iter_ = nullptr;
     }
 }
 
-void Iterator::seekToFirst() {
+void Iterator::seekToFirst()
+{
     int result = tidesdb_iter_seek_to_first(iter_);
     checkResult(result, "failed to seek to first");
 }
 
-void Iterator::seekToLast() {
+void Iterator::seekToLast()
+{
     int result = tidesdb_iter_seek_to_last(iter_);
     checkResult(result, "failed to seek to last");
 }
 
-void Iterator::seek(std::string_view key) {
-    int result = tidesdb_iter_seek(iter_,
-                                    reinterpret_cast<const uint8_t*>(key.data()),
-                                    key.size());
+void Iterator::seek(std::string_view key)
+{
+    int result = tidesdb_iter_seek(iter_, reinterpret_cast<const uint8_t*>(key.data()), key.size());
     checkResult(result, "failed to seek");
 }
 
-void Iterator::seekForPrev(std::string_view key) {
-    int result = tidesdb_iter_seek_for_prev(iter_,
-                                             reinterpret_cast<const uint8_t*>(key.data()),
-                                             key.size());
+void Iterator::seekForPrev(std::string_view key)
+{
+    int result =
+        tidesdb_iter_seek_for_prev(iter_, reinterpret_cast<const uint8_t*>(key.data()), key.size());
     checkResult(result, "failed to seek for prev");
 }
 
-bool Iterator::valid() const {
+bool Iterator::valid() const
+{
     return tidesdb_iter_valid(iter_) != 0;
 }
 
-void Iterator::next() {
+void Iterator::next()
+{
     int result = tidesdb_iter_next(iter_);
     // TDB_ERR_NOT_FOUND is expected at end of iteration, not an error
-    if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND) {
+    if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND)
+    {
         checkResult(result, "failed to move to next");
     }
 }
 
-void Iterator::prev() {
+void Iterator::prev()
+{
     int result = tidesdb_iter_prev(iter_);
     // TDB_ERR_NOT_FOUND is expected at end of iteration, not an error
-    if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND) {
+    if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND)
+    {
         checkResult(result, "failed to move to prev");
     }
 }
 
-std::vector<std::uint8_t> Iterator::key() const {
+std::vector<std::uint8_t> Iterator::key() const
+{
     uint8_t* keyData = nullptr;
     size_t keySize = 0;
 
@@ -225,7 +256,8 @@ std::vector<std::uint8_t> Iterator::key() const {
     return keyVec;
 }
 
-std::vector<std::uint8_t> Iterator::value() const {
+std::vector<std::uint8_t> Iterator::value() const
+{
     uint8_t* valueData = nullptr;
     size_t valueSize = 0;
 
@@ -240,13 +272,17 @@ std::vector<std::uint8_t> Iterator::value() const {
 // Transaction
 //-----------------------------------------------------------------------------
 
-Transaction::Transaction(Transaction&& other) noexcept : txn_(other.txn_) {
+Transaction::Transaction(Transaction&& other) noexcept : txn_(other.txn_)
+{
     other.txn_ = nullptr;
 }
 
-Transaction& Transaction::operator=(Transaction&& other) noexcept {
-    if (this != &other) {
-        if (txn_ != nullptr) {
+Transaction& Transaction::operator=(Transaction&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (txn_ != nullptr)
+        {
             tidesdb_txn_free(txn_);
         }
         txn_ = other.txn_;
@@ -255,41 +291,39 @@ Transaction& Transaction::operator=(Transaction&& other) noexcept {
     return *this;
 }
 
-Transaction::~Transaction() {
-    if (txn_ != nullptr) {
+Transaction::~Transaction()
+{
+    if (txn_ != nullptr)
+    {
         tidesdb_txn_free(txn_);
         txn_ = nullptr;
     }
 }
 
 void Transaction::put(ColumnFamily& cf, std::string_view key, std::string_view value,
-                      std::time_t ttl) {
-    int result = tidesdb_txn_put(txn_, cf.handle(),
-                                  reinterpret_cast<const uint8_t*>(key.data()),
-                                  key.size(),
-                                  reinterpret_cast<const uint8_t*>(value.data()),
-                                  value.size(),
-                                  ttl);
+                      std::time_t ttl)
+{
+    int result =
+        tidesdb_txn_put(txn_, cf.handle(), reinterpret_cast<const uint8_t*>(key.data()), key.size(),
+                        reinterpret_cast<const uint8_t*>(value.data()), value.size(), ttl);
     checkResult(result, "failed to put key-value pair");
 }
 
 void Transaction::put(ColumnFamily& cf, const std::vector<std::uint8_t>& key,
-                      const std::vector<std::uint8_t>& value, std::time_t ttl) {
-    int result = tidesdb_txn_put(txn_, cf.handle(),
-                                  key.data(), key.size(),
-                                  value.data(), value.size(),
-                                  ttl);
+                      const std::vector<std::uint8_t>& value, std::time_t ttl)
+{
+    int result =
+        tidesdb_txn_put(txn_, cf.handle(), key.data(), key.size(), value.data(), value.size(), ttl);
     checkResult(result, "failed to put key-value pair");
 }
 
-std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf, std::string_view key) {
+std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf, std::string_view key)
+{
     uint8_t* valueData = nullptr;
     size_t valueSize = 0;
 
-    int result = tidesdb_txn_get(txn_, cf.handle(),
-                                  reinterpret_cast<const uint8_t*>(key.data()),
-                                  key.size(),
-                                  &valueData, &valueSize);
+    int result = tidesdb_txn_get(txn_, cf.handle(), reinterpret_cast<const uint8_t*>(key.data()),
+                                 key.size(), &valueData, &valueSize);
     checkResult(result, "failed to get value");
 
     std::vector<std::uint8_t> valueVec(valueData, valueData + valueSize);
@@ -297,14 +331,12 @@ std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf, std::string_view ke
     return valueVec;
 }
 
-std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf,
-                                            const std::vector<std::uint8_t>& key) {
+std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf, const std::vector<std::uint8_t>& key)
+{
     uint8_t* valueData = nullptr;
     size_t valueSize = 0;
 
-    int result = tidesdb_txn_get(txn_, cf.handle(),
-                                  key.data(), key.size(),
-                                  &valueData, &valueSize);
+    int result = tidesdb_txn_get(txn_, cf.handle(), key.data(), key.size(), &valueData, &valueSize);
     checkResult(result, "failed to get value");
 
     std::vector<std::uint8_t> valueVec(valueData, valueData + valueSize);
@@ -312,44 +344,51 @@ std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf,
     return valueVec;
 }
 
-void Transaction::del(ColumnFamily& cf, std::string_view key) {
-    int result = tidesdb_txn_delete(txn_, cf.handle(),
-                                     reinterpret_cast<const uint8_t*>(key.data()),
-                                     key.size());
+void Transaction::del(ColumnFamily& cf, std::string_view key)
+{
+    int result = tidesdb_txn_delete(txn_, cf.handle(), reinterpret_cast<const uint8_t*>(key.data()),
+                                    key.size());
     checkResult(result, "failed to delete key");
 }
 
-void Transaction::del(ColumnFamily& cf, const std::vector<std::uint8_t>& key) {
+void Transaction::del(ColumnFamily& cf, const std::vector<std::uint8_t>& key)
+{
     int result = tidesdb_txn_delete(txn_, cf.handle(), key.data(), key.size());
     checkResult(result, "failed to delete key");
 }
 
-void Transaction::commit() {
+void Transaction::commit()
+{
     int result = tidesdb_txn_commit(txn_);
     checkResult(result, "failed to commit transaction");
 }
 
-void Transaction::rollback() {
+void Transaction::rollback()
+{
     int result = tidesdb_txn_rollback(txn_);
     checkResult(result, "failed to rollback transaction");
 }
 
-void Transaction::savepoint(const std::string& name) {
+void Transaction::savepoint(const std::string& name)
+{
     int result = tidesdb_txn_savepoint(txn_, name.c_str());
     checkResult(result, "failed to create savepoint");
 }
 
-void Transaction::rollbackToSavepoint(const std::string& name) {
+void Transaction::rollbackToSavepoint(const std::string& name)
+{
     int result = tidesdb_txn_rollback_to_savepoint(txn_, name.c_str());
     checkResult(result, "failed to rollback to savepoint");
 }
 
-void Transaction::releaseSavepoint(const std::string& name) {
+void Transaction::releaseSavepoint(const std::string& name)
+{
     int result = tidesdb_txn_release_savepoint(txn_, name.c_str());
     checkResult(result, "failed to release savepoint");
 }
 
-Iterator Transaction::newIterator(ColumnFamily& cf) {
+Iterator Transaction::newIterator(ColumnFamily& cf)
+{
     tidesdb_iter_t* iter = nullptr;
     int result = tidesdb_iter_new(txn_, cf.handle(), &iter);
     checkResult(result, "failed to create iterator");
@@ -360,7 +399,8 @@ Iterator Transaction::newIterator(ColumnFamily& cf) {
 // TidesDB
 //-----------------------------------------------------------------------------
 
-TidesDB::TidesDB(const Config& config) {
+TidesDB::TidesDB(const Config& config)
+{
     tidesdb_config_t cConfig;
     cConfig.db_path = const_cast<char*>(config.dbPath.c_str());
     cConfig.num_flush_threads = config.numFlushThreads;
@@ -373,13 +413,17 @@ TidesDB::TidesDB(const Config& config) {
     checkResult(result, "failed to open database");
 }
 
-TidesDB::TidesDB(TidesDB&& other) noexcept : db_(other.db_) {
+TidesDB::TidesDB(TidesDB&& other) noexcept : db_(other.db_)
+{
     other.db_ = nullptr;
 }
 
-TidesDB& TidesDB::operator=(TidesDB&& other) noexcept {
-    if (this != &other) {
-        if (db_ != nullptr) {
+TidesDB& TidesDB::operator=(TidesDB&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (db_ != nullptr)
+        {
             tidesdb_close(db_);
         }
         db_ = other.db_;
@@ -388,14 +432,17 @@ TidesDB& TidesDB::operator=(TidesDB&& other) noexcept {
     return *this;
 }
 
-TidesDB::~TidesDB() {
-    if (db_ != nullptr) {
+TidesDB::~TidesDB()
+{
+    if (db_ != nullptr)
+    {
         tidesdb_close(db_);
         db_ = nullptr;
     }
 }
 
-void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConfig& config) {
+void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConfig& config)
+{
     tidesdb_column_family_config_t cConfig;
     cConfig.write_buffer_size = config.writeBufferSize;
     cConfig.level_size_ratio = config.levelSizeRatio;
@@ -412,13 +459,15 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     cConfig.sync_interval_us = config.syncIntervalUs;
     cConfig.skip_list_max_level = config.skipListMaxLevel;
     cConfig.skip_list_probability = config.skipListProbability;
-    cConfig.default_isolation_level = static_cast<tidesdb_isolation_level_t>(config.defaultIsolationLevel);
+    cConfig.default_isolation_level =
+        static_cast<tidesdb_isolation_level_t>(config.defaultIsolationLevel);
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
-    if (!config.comparatorName.empty()) {
+    if (!config.comparatorName.empty())
+    {
         std::strncpy(cConfig.comparator_name, config.comparatorName.c_str(),
                      TDB_MAX_COMPARATOR_NAME - 1);
     }
@@ -430,20 +479,24 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     checkResult(result, "failed to create column family");
 }
 
-void TidesDB::dropColumnFamily(const std::string& name) {
+void TidesDB::dropColumnFamily(const std::string& name)
+{
     int result = tidesdb_drop_column_family(db_, name.c_str());
     checkResult(result, "failed to drop column family");
 }
 
-ColumnFamily TidesDB::getColumnFamily(const std::string& name) {
+ColumnFamily TidesDB::getColumnFamily(const std::string& name)
+{
     tidesdb_column_family_t* cf = tidesdb_get_column_family(db_, name.c_str());
-    if (cf == nullptr) {
+    if (cf == nullptr)
+    {
         throw Exception(ErrorCode::NotFound, "column family not found: " + name);
     }
     return ColumnFamily(cf);
 }
 
-std::vector<std::string> TidesDB::listColumnFamilies() {
+std::vector<std::string> TidesDB::listColumnFamilies()
+{
     char** names = nullptr;
     int count = 0;
 
@@ -453,7 +506,8 @@ std::vector<std::string> TidesDB::listColumnFamilies() {
     std::vector<std::string> cfNames;
     cfNames.reserve(count);
 
-    for (int i = 0; i < count; ++i) {
+    for (int i = 0; i < count; ++i)
+    {
         cfNames.emplace_back(names[i]);
         std::free(names[i]);
     }
@@ -462,23 +516,25 @@ std::vector<std::string> TidesDB::listColumnFamilies() {
     return cfNames;
 }
 
-Transaction TidesDB::beginTransaction() {
+Transaction TidesDB::beginTransaction()
+{
     tidesdb_txn_t* txn = nullptr;
     int result = tidesdb_txn_begin(db_, &txn);
     checkResult(result, "failed to begin transaction");
     return Transaction(txn);
 }
 
-Transaction TidesDB::beginTransaction(IsolationLevel isolation) {
+Transaction TidesDB::beginTransaction(IsolationLevel isolation)
+{
     tidesdb_txn_t* txn = nullptr;
-    int result = tidesdb_txn_begin_with_isolation(db_,
-                                                   static_cast<tidesdb_isolation_level_t>(isolation),
-                                                   &txn);
+    int result = tidesdb_txn_begin_with_isolation(
+        db_, static_cast<tidesdb_isolation_level_t>(isolation), &txn);
     checkResult(result, "failed to begin transaction with isolation");
     return Transaction(txn);
 }
 
-CacheStats TidesDB::getCacheStats() {
+CacheStats TidesDB::getCacheStats()
+{
     tidesdb_cache_stats_t cStats;
     int result = tidesdb_get_cache_stats(db_, &cStats);
     checkResult(result, "failed to get cache stats");
@@ -495,10 +551,11 @@ CacheStats TidesDB::getCacheStats() {
     return stats;
 }
 
-void TidesDB::registerComparator(const std::string& name, const std::string& ctxStr) {
+void TidesDB::registerComparator(const std::string& name, const std::string& ctxStr)
+{
     const char* ctxStrPtr = ctxStr.empty() ? nullptr : ctxStr.c_str();
     int result = tidesdb_register_comparator(db_, name.c_str(), nullptr, ctxStrPtr, nullptr);
     checkResult(result, "failed to register comparator");
 }
 
-} // namespace tidesdb
+}  // namespace tidesdb

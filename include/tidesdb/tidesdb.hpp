@@ -28,16 +28,19 @@
 #include <string_view>
 #include <vector>
 
-extern "C" {
+extern "C"
+{
 #include <tidesdb/db.h>
 }
 
-namespace tidesdb {
+namespace tidesdb
+{
 
 /**
  * @brief Compression algorithms supported by TidesDB
  */
-enum class CompressionAlgorithm {
+enum class CompressionAlgorithm
+{
     None = NO_COMPRESSION,
     LZ4 = LZ4_COMPRESSION,
     Zstd = ZSTD_COMPRESSION,
@@ -47,7 +50,8 @@ enum class CompressionAlgorithm {
 /**
  * @brief Sync modes for durability control
  */
-enum class SyncMode {
+enum class SyncMode
+{
     None = TDB_SYNC_NONE,
     Full = TDB_SYNC_FULL,
     Interval = TDB_SYNC_INTERVAL
@@ -56,7 +60,8 @@ enum class SyncMode {
 /**
  * @brief Log levels for database logging
  */
-enum class LogLevel {
+enum class LogLevel
+{
     Debug = TDB_LOG_DEBUG,
     Info = TDB_LOG_INFO,
     Warn = TDB_LOG_WARN,
@@ -68,7 +73,8 @@ enum class LogLevel {
 /**
  * @brief Transaction isolation levels
  */
-enum class IsolationLevel {
+enum class IsolationLevel
+{
     ReadUncommitted = TDB_ISOLATION_READ_UNCOMMITTED,
     ReadCommitted = TDB_ISOLATION_READ_COMMITTED,
     RepeatableRead = TDB_ISOLATION_REPEATABLE_READ,
@@ -79,7 +85,8 @@ enum class IsolationLevel {
 /**
  * @brief Error codes from TidesDB operations
  */
-enum class ErrorCode {
+enum class ErrorCode
+{
     Success = TDB_SUCCESS,
     Memory = TDB_ERR_MEMORY,
     InvalidArgs = TDB_ERR_INVALID_ARGS,
@@ -98,32 +105,53 @@ enum class ErrorCode {
 /**
  * @brief Exception class for TidesDB errors
  */
-class Exception : public std::runtime_error {
-public:
+class Exception : public std::runtime_error
+{
+   public:
     explicit Exception(ErrorCode code, const std::string& message)
-        : std::runtime_error(message), code_(code) {}
+        : std::runtime_error(message), code_(code)
+    {
+    }
 
-    [[nodiscard]] ErrorCode code() const noexcept { return code_; }
+    [[nodiscard]] ErrorCode code() const noexcept
+    {
+        return code_;
+    }
 
-    [[nodiscard]] static std::string errorMessage(int code) {
-        switch (code) {
-            case TDB_SUCCESS: return "success";
-            case TDB_ERR_MEMORY: return "memory allocation failed";
-            case TDB_ERR_INVALID_ARGS: return "invalid arguments";
-            case TDB_ERR_NOT_FOUND: return "not found";
-            case TDB_ERR_IO: return "I/O error";
-            case TDB_ERR_CORRUPTION: return "data corruption";
-            case TDB_ERR_EXISTS: return "already exists";
-            case TDB_ERR_CONFLICT: return "transaction conflict";
-            case TDB_ERR_TOO_LARGE: return "key or value too large";
-            case TDB_ERR_MEMORY_LIMIT: return "memory limit exceeded";
-            case TDB_ERR_INVALID_DB: return "invalid database handle";
-            case TDB_ERR_LOCKED: return "database is locked";
-            default: return "unknown error";
+    [[nodiscard]] static std::string errorMessage(int code)
+    {
+        switch (code)
+        {
+            case TDB_SUCCESS:
+                return "success";
+            case TDB_ERR_MEMORY:
+                return "memory allocation failed";
+            case TDB_ERR_INVALID_ARGS:
+                return "invalid arguments";
+            case TDB_ERR_NOT_FOUND:
+                return "not found";
+            case TDB_ERR_IO:
+                return "I/O error";
+            case TDB_ERR_CORRUPTION:
+                return "data corruption";
+            case TDB_ERR_EXISTS:
+                return "already exists";
+            case TDB_ERR_CONFLICT:
+                return "transaction conflict";
+            case TDB_ERR_TOO_LARGE:
+                return "key or value too large";
+            case TDB_ERR_MEMORY_LIMIT:
+                return "memory limit exceeded";
+            case TDB_ERR_INVALID_DB:
+                return "invalid database handle";
+            case TDB_ERR_LOCKED:
+                return "database is locked";
+            default:
+                return "unknown error";
         }
     }
 
-private:
+   private:
     ErrorCode code_;
 };
 
@@ -135,7 +163,8 @@ class Iterator;
 /**
  * @brief Configuration for a column family
  */
-struct ColumnFamilyConfig {
+struct ColumnFamilyConfig
+{
     std::size_t writeBufferSize = 64 * 1024 * 1024;
     std::size_t levelSizeRatio = 10;
     int minLevels = 5;
@@ -166,7 +195,8 @@ struct ColumnFamilyConfig {
 /**
  * @brief Database configuration
  */
-struct Config {
+struct Config
+{
     std::string dbPath;
     int numFlushThreads = 2;
     int numCompactionThreads = 2;
@@ -178,7 +208,8 @@ struct Config {
 /**
  * @brief Statistics for a column family
  */
-struct Stats {
+struct Stats
+{
     int numLevels = 0;
     std::size_t memtableSize = 0;
     std::vector<std::size_t> levelSizes;
@@ -189,7 +220,8 @@ struct Stats {
 /**
  * @brief Block cache statistics
  */
-struct CacheStats {
+struct CacheStats
+{
     bool enabled = false;
     std::size_t totalEntries = 0;
     std::size_t totalBytes = 0;
@@ -202,8 +234,9 @@ struct CacheStats {
 /**
  * @brief RAII wrapper for a column family
  */
-class ColumnFamily {
-public:
+class ColumnFamily
+{
+   public:
     ColumnFamily(const ColumnFamily&) = delete;
     ColumnFamily& operator=(const ColumnFamily&) = delete;
     ColumnFamily(ColumnFamily&& other) noexcept;
@@ -228,11 +261,16 @@ public:
     /**
      * @brief Get the underlying C handle (for internal use)
      */
-    [[nodiscard]] tidesdb_column_family_t* handle() const noexcept { return cf_; }
+    [[nodiscard]] tidesdb_column_family_t* handle() const noexcept
+    {
+        return cf_;
+    }
 
-private:
+   private:
     friend class TidesDB;
-    explicit ColumnFamily(tidesdb_column_family_t* cf) : cf_(cf) {}
+    explicit ColumnFamily(tidesdb_column_family_t* cf) : cf_(cf)
+    {
+    }
 
     tidesdb_column_family_t* cf_ = nullptr;
 };
@@ -240,8 +278,9 @@ private:
 /**
  * @brief RAII wrapper for an iterator
  */
-class Iterator {
-public:
+class Iterator
+{
+   public:
     Iterator(const Iterator&) = delete;
     Iterator& operator=(const Iterator&) = delete;
     Iterator(Iterator&& other) noexcept;
@@ -293,9 +332,11 @@ public:
      */
     [[nodiscard]] std::vector<std::uint8_t> value() const;
 
-private:
+   private:
     friend class Transaction;
-    explicit Iterator(tidesdb_iter_t* iter) : iter_(iter) {}
+    explicit Iterator(tidesdb_iter_t* iter) : iter_(iter)
+    {
+    }
 
     tidesdb_iter_t* iter_ = nullptr;
 };
@@ -303,8 +344,9 @@ private:
 /**
  * @brief RAII wrapper for a transaction
  */
-class Transaction {
-public:
+class Transaction
+{
+   public:
     Transaction(const Transaction&) = delete;
     Transaction& operator=(const Transaction&) = delete;
     Transaction(Transaction&& other) noexcept;
@@ -336,7 +378,7 @@ public:
      * @brief Get a value by key (byte vector overload)
      */
     [[nodiscard]] std::vector<std::uint8_t> get(ColumnFamily& cf,
-                                                 const std::vector<std::uint8_t>& key);
+                                                const std::vector<std::uint8_t>& key);
 
     /**
      * @brief Delete a key
@@ -378,9 +420,11 @@ public:
      */
     [[nodiscard]] Iterator newIterator(ColumnFamily& cf);
 
-private:
+   private:
     friend class TidesDB;
-    explicit Transaction(tidesdb_txn_t* txn) : txn_(txn) {}
+    explicit Transaction(tidesdb_txn_t* txn) : txn_(txn)
+    {
+    }
 
     tidesdb_txn_t* txn_ = nullptr;
 };
@@ -391,8 +435,9 @@ private:
  * This class provides a C++17 RAII wrapper around the TidesDB C API.
  * It manages the database lifecycle and provides methods for all database operations.
  */
-class TidesDB {
-public:
+class TidesDB
+{
+   public:
     /**
      * @brief Open a TidesDB database
      * @param config Database configuration
@@ -462,10 +507,10 @@ public:
      */
     void registerComparator(const std::string& name, const std::string& ctxStr = "");
 
-private:
+   private:
     tidesdb_t* db_ = nullptr;
 };
 
-} // namespace tidesdb
+}  // namespace tidesdb
 
-#endif // TIDESDB_CPP_HPP
+#endif  // TIDESDB_CPP_HPP

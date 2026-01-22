@@ -15,6 +15,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "tidesdb/tidesdb.hpp"
+
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -24,21 +26,23 @@
 #include <thread>
 #include <vector>
 
-#include "tidesdb/tidesdb.hpp"
-
 namespace fs = std::filesystem;
 
-class TidesDBTest : public ::testing::Test {
-protected:
-    void SetUp() override {
+class TidesDBTest : public ::testing::Test
+{
+   protected:
+    void SetUp() override
+    {
         fs::remove_all(testDbPath_);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         fs::remove_all(testDbPath_);
     }
 
-    tidesdb::Config getConfig() const {
+    tidesdb::Config getConfig() const
+    {
         tidesdb::Config config;
         config.dbPath = testDbPath_;
         config.numFlushThreads = 2;
@@ -52,11 +56,13 @@ protected:
     const std::string testDbPath_ = "testdb_cpp";
 };
 
-TEST_F(TidesDBTest, OpenClose) {
+TEST_F(TidesDBTest, OpenClose)
+{
     tidesdb::TidesDB db(getConfig());
 }
 
-TEST_F(TidesDBTest, CreateDropColumnFamily) {
+TEST_F(TidesDBTest, CreateDropColumnFamily)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -67,23 +73,28 @@ TEST_F(TidesDBTest, CreateDropColumnFamily) {
     db.dropColumnFamily("test_cf");
 }
 
-TEST_F(TidesDBTest, ListColumnFamilies) {
+TEST_F(TidesDBTest, ListColumnFamilies)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
 
     std::vector<std::string> cfNames = {"cf1", "cf2", "cf3"};
-    for (const auto& name : cfNames) {
+    for (const auto& name : cfNames)
+    {
         db.createColumnFamily(name, cfConfig);
     }
 
     auto list = db.listColumnFamilies();
     ASSERT_EQ(list.size(), cfNames.size());
 
-    for (const auto& expectedName : cfNames) {
+    for (const auto& expectedName : cfNames)
+    {
         bool found = false;
-        for (const auto& name : list) {
-            if (name == expectedName) {
+        for (const auto& name : list)
+        {
+            if (name == expectedName)
+            {
                 found = true;
                 break;
             }
@@ -92,7 +103,8 @@ TEST_F(TidesDBTest, ListColumnFamilies) {
     }
 }
 
-TEST_F(TidesDBTest, TransactionPutGetDelete) {
+TEST_F(TidesDBTest, TransactionPutGetDelete)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -125,7 +137,8 @@ TEST_F(TidesDBTest, TransactionPutGetDelete) {
     }
 }
 
-TEST_F(TidesDBTest, TransactionWithTTL) {
+TEST_F(TidesDBTest, TransactionWithTTL)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -156,7 +169,8 @@ TEST_F(TidesDBTest, TransactionWithTTL) {
     }
 }
 
-TEST_F(TidesDBTest, MultiOperationTransaction) {
+TEST_F(TidesDBTest, MultiOperationTransaction)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -174,7 +188,8 @@ TEST_F(TidesDBTest, MultiOperationTransaction) {
 
     {
         auto txn = db.beginTransaction();
-        for (int i = 1; i <= 3; ++i) {
+        for (int i = 1; i <= 3; ++i)
+        {
             std::string key = "key" + std::to_string(i);
             std::string expectedValue = "value" + std::to_string(i);
 
@@ -185,7 +200,8 @@ TEST_F(TidesDBTest, MultiOperationTransaction) {
     }
 }
 
-TEST_F(TidesDBTest, TransactionRollback) {
+TEST_F(TidesDBTest, TransactionRollback)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -205,7 +221,8 @@ TEST_F(TidesDBTest, TransactionRollback) {
     }
 }
 
-TEST_F(TidesDBTest, Savepoints) {
+TEST_F(TidesDBTest, Savepoints)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -238,7 +255,8 @@ TEST_F(TidesDBTest, Savepoints) {
     }
 }
 
-TEST_F(TidesDBTest, IsolationLevels) {
+TEST_F(TidesDBTest, IsolationLevels)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -251,10 +269,10 @@ TEST_F(TidesDBTest, IsolationLevels) {
         {"read_committed", tidesdb::IsolationLevel::ReadCommitted},
         {"repeatable_read", tidesdb::IsolationLevel::RepeatableRead},
         {"snapshot", tidesdb::IsolationLevel::Snapshot},
-        {"serializable", tidesdb::IsolationLevel::Serializable}
-    };
+        {"serializable", tidesdb::IsolationLevel::Serializable}};
 
-    for (const auto& [name, level] : isolationLevels) {
+    for (const auto& [name, level] : isolationLevels)
+    {
         auto txn = db.beginTransaction(level);
         std::string key = "key_" + name;
         std::string value = "value_" + name;
@@ -263,7 +281,8 @@ TEST_F(TidesDBTest, IsolationLevels) {
     }
 }
 
-TEST_F(TidesDBTest, IteratorForward) {
+TEST_F(TidesDBTest, IteratorForward)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -271,17 +290,16 @@ TEST_F(TidesDBTest, IteratorForward) {
 
     auto cf = db.getColumnFamily("test_cf");
 
-    std::map<std::string, std::string> testData = {
-        {"key1", "value1"},
-        {"key2", "value2"},
-        {"key3", "value3"},
-        {"key4", "value4"},
-        {"key5", "value5"}
-    };
+    std::map<std::string, std::string> testData = {{"key1", "value1"},
+                                                   {"key2", "value2"},
+                                                   {"key3", "value3"},
+                                                   {"key4", "value4"},
+                                                   {"key5", "value5"}};
 
     {
         auto txn = db.beginTransaction();
-        for (const auto& [k, v] : testData) {
+        for (const auto& [k, v] : testData)
+        {
             txn.put(cf, k, v, -1);
         }
         txn.commit();
@@ -293,7 +311,8 @@ TEST_F(TidesDBTest, IteratorForward) {
         iter.seekToFirst();
 
         int count = 0;
-        while (iter.valid()) {
+        while (iter.valid())
+        {
             auto key = iter.key();
             auto value = iter.value();
             std::string keyStr(key.begin(), key.end());
@@ -310,7 +329,8 @@ TEST_F(TidesDBTest, IteratorForward) {
     }
 }
 
-TEST_F(TidesDBTest, IteratorBackward) {
+TEST_F(TidesDBTest, IteratorBackward)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -319,14 +339,12 @@ TEST_F(TidesDBTest, IteratorBackward) {
     auto cf = db.getColumnFamily("test_cf");
 
     std::map<std::string, std::string> testData = {
-        {"key1", "value1"},
-        {"key2", "value2"},
-        {"key3", "value3"}
-    };
+        {"key1", "value1"}, {"key2", "value2"}, {"key3", "value3"}};
 
     {
         auto txn = db.beginTransaction();
-        for (const auto& [k, v] : testData) {
+        for (const auto& [k, v] : testData)
+        {
             txn.put(cf, k, v, -1);
         }
         txn.commit();
@@ -338,7 +356,8 @@ TEST_F(TidesDBTest, IteratorBackward) {
         iter.seekToLast();
 
         int count = 0;
-        while (iter.valid()) {
+        while (iter.valid())
+        {
             auto key = iter.key();
             auto value = iter.value();
             std::string keyStr(key.begin(), key.end());
@@ -355,7 +374,8 @@ TEST_F(TidesDBTest, IteratorBackward) {
     }
 }
 
-TEST_F(TidesDBTest, IteratorSeek) {
+TEST_F(TidesDBTest, IteratorSeek)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -365,7 +385,8 @@ TEST_F(TidesDBTest, IteratorSeek) {
 
     {
         auto txn = db.beginTransaction();
-        for (int i = 1; i <= 10; ++i) {
+        for (int i = 1; i <= 10; ++i)
+        {
             char key[16], value[16];
             std::snprintf(key, sizeof(key), "key%02d", i);
             std::snprintf(value, sizeof(value), "value%02d", i);
@@ -379,7 +400,8 @@ TEST_F(TidesDBTest, IteratorSeek) {
         auto iter = txn.newIterator(cf);
         iter.seek("key05");
 
-        if (iter.valid()) {
+        if (iter.valid())
+        {
             auto key = iter.key();
             std::string keyStr(key.begin(), key.end());
             ASSERT_GE(keyStr, "key05");
@@ -387,7 +409,8 @@ TEST_F(TidesDBTest, IteratorSeek) {
     }
 }
 
-TEST_F(TidesDBTest, GetStats) {
+TEST_F(TidesDBTest, GetStats)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -402,7 +425,8 @@ TEST_F(TidesDBTest, GetStats) {
 
     {
         auto txn = db.beginTransaction();
-        for (int i = 0; i < 10; ++i) {
+        for (int i = 0; i < 10; ++i)
+        {
             std::string key = "key" + std::to_string(i);
             std::string value = "value" + std::to_string(i);
             txn.put(cf, key, value, -1);
@@ -414,14 +438,16 @@ TEST_F(TidesDBTest, GetStats) {
     ASSERT_GE(stats.numLevels, 0);
 }
 
-TEST_F(TidesDBTest, CacheStats) {
+TEST_F(TidesDBTest, CacheStats)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cacheStats = db.getCacheStats();
     ASSERT_TRUE(cacheStats.enabled);
 }
 
-TEST_F(TidesDBTest, Compaction) {
+TEST_F(TidesDBTest, Compaction)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -431,9 +457,11 @@ TEST_F(TidesDBTest, Compaction) {
 
     auto cf = db.getColumnFamily("test_cf");
 
-    for (int batch = 0; batch < 5; ++batch) {
+    for (int batch = 0; batch < 5; ++batch)
+    {
         auto txn = db.beginTransaction();
-        for (int i = 0; i < 20; ++i) {
+        for (int i = 0; i < 20; ++i)
+        {
             std::string key = "key" + std::to_string(batch) + "_" + std::to_string(i);
             std::vector<std::uint8_t> value(512, static_cast<std::uint8_t>(i % 256));
             txn.put(cf, std::vector<std::uint8_t>(key.begin(), key.end()), value, -1);
@@ -444,7 +472,8 @@ TEST_F(TidesDBTest, Compaction) {
     cf.compact();
 }
 
-TEST_F(TidesDBTest, FlushMemtable) {
+TEST_F(TidesDBTest, FlushMemtable)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -454,7 +483,8 @@ TEST_F(TidesDBTest, FlushMemtable) {
 
     {
         auto txn = db.beginTransaction();
-        for (int i = 0; i < 100; ++i) {
+        for (int i = 0; i < 100; ++i)
+        {
             std::string key = "key" + std::to_string(i);
             std::string value = "value" + std::to_string(i);
             txn.put(cf, key, value, -1);
@@ -465,23 +495,25 @@ TEST_F(TidesDBTest, FlushMemtable) {
     cf.flushMemtable();
 }
 
-TEST_F(TidesDBTest, NonExistentColumnFamily) {
+TEST_F(TidesDBTest, NonExistentColumnFamily)
+{
     tidesdb::TidesDB db(getConfig());
 
     EXPECT_THROW(db.getColumnFamily("nonexistent_cf"), tidesdb::Exception);
     EXPECT_THROW(db.dropColumnFamily("nonexistent_cf"), tidesdb::Exception);
 }
 
-TEST_F(TidesDBTest, SyncModes) {
+TEST_F(TidesDBTest, SyncModes)
+{
     tidesdb::TidesDB db(getConfig());
 
     std::vector<std::tuple<std::string, tidesdb::SyncMode, std::uint64_t>> syncModes = {
         {"none", tidesdb::SyncMode::None, 0},
         {"interval", tidesdb::SyncMode::Interval, 128000},
-        {"full", tidesdb::SyncMode::Full, 0}
-    };
+        {"full", tidesdb::SyncMode::Full, 0}};
 
-    for (const auto& [name, mode, intervalUs] : syncModes) {
+    for (const auto& [name, mode, intervalUs] : syncModes)
+    {
         std::string cfName = "cf_" + name;
 
         auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -493,23 +525,25 @@ TEST_F(TidesDBTest, SyncModes) {
         auto cf = db.getColumnFamily(cfName);
         auto stats = cf.getStats();
 
-        if (stats.config.has_value()) {
+        if (stats.config.has_value())
+        {
             ASSERT_EQ(stats.config->syncMode, mode);
         }
     }
 }
 
-TEST_F(TidesDBTest, CompressionAlgorithms) {
+TEST_F(TidesDBTest, CompressionAlgorithms)
+{
     tidesdb::TidesDB db(getConfig());
 
     std::vector<std::pair<std::string, tidesdb::CompressionAlgorithm>> compressionAlgos = {
         {"none", tidesdb::CompressionAlgorithm::None},
         {"lz4", tidesdb::CompressionAlgorithm::LZ4},
         {"lz4_fast", tidesdb::CompressionAlgorithm::LZ4Fast},
-        {"zstd", tidesdb::CompressionAlgorithm::Zstd}
-    };
+        {"zstd", tidesdb::CompressionAlgorithm::Zstd}};
 
-    for (const auto& [name, algo] : compressionAlgos) {
+    for (const auto& [name, algo] : compressionAlgos)
+    {
         std::string cfName = "cf_" + name;
 
         auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -520,13 +554,15 @@ TEST_F(TidesDBTest, CompressionAlgorithms) {
         auto cf = db.getColumnFamily(cfName);
         auto stats = cf.getStats();
 
-        if (stats.config.has_value()) {
+        if (stats.config.has_value())
+        {
             ASSERT_EQ(stats.config->compressionAlgorithm, algo);
         }
     }
 }
 
-TEST_F(TidesDBTest, ByteVectorOperations) {
+TEST_F(TidesDBTest, ByteVectorOperations)
+{
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
@@ -561,7 +597,8 @@ TEST_F(TidesDBTest, ByteVectorOperations) {
     }
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
