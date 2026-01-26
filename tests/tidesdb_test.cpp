@@ -597,6 +597,158 @@ TEST_F(TidesDBTest, ByteVectorOperations)
     }
 }
 
+TEST_F(TidesDBTest, RenameColumnFamily)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("old_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("old_cf");
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key", "value", -1);
+        txn.commit();
+    }
+
+    db.renameColumnFamily("old_cf", "new_cf");
+
+    EXPECT_THROW(db.getColumnFamily("old_cf"), tidesdb::Exception);
+
+    auto newCf = db.getColumnFamily("new_cf");
+    {
+        auto txn = db.beginTransaction();
+        auto value = txn.get(newCf, "key");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "value");
+    }
+}
+
+TEST_F(TidesDBTest, IsFlushingAndCompacting)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    bool isFlushing = cf.isFlushing();
+    bool isCompacting = cf.isCompacting();
+
+    ASSERT_FALSE(isFlushing);
+    ASSERT_FALSE(isCompacting);
+}
+
+TEST_F(TidesDBTest, Backup)
+{
+    std::string backupPath = testDbPath_ + "_backup";
+    fs::remove_all(backupPath);
+
+    {
+        tidesdb::TidesDB db(getConfig());
+
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        db.createColumnFamily("test_cf", cfConfig);
+
+        auto cf = db.getColumnFamily("test_cf");
+        {
+            auto txn = db.beginTransaction();
+            txn.put(cf, "backup_key", "backup_value", -1);
+            txn.commit();
+        }
+
+        db.backup(backupPath);
+    }
+
+    ASSERT_TRUE(fs::exists(backupPath));
+
+    {
+        tidesdb::Config config;
+        config.dbPath = backupPath;
+        config.numFlushThreads = 2;
+        config.numCompactionThreads = 2;
+        config.logLevel = tidesdb::LogLevel::Info;
+        config.blockCacheSize = 64 * 1024 * 1024;
+        config.maxOpenSSTables = 256;
+
+        tidesdb::TidesDB backupDb(config);
+        auto cf = backupDb.getColumnFamily("test_cf");
+        auto txn = backupDb.beginTransaction();
+        auto value = txn.get(cf, "backup_key");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "backup_value");
+    }
+
+    fs::remove_all(backupPath);
+}
+
+TEST_F(TidesDBTest, ExtendedStats)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 2 * 1024 * 1024;
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 100; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    auto stats = cf.getStats();
+
+    ASSERT_GE(stats.numLevels, 0);
+    ASSERT_GE(stats.totalKeys, 0u);
+    ASSERT_GE(stats.totalDataSize, 0u);
+    ASSERT_GE(stats.avgKeySize, 0.0);
+    ASSERT_GE(stats.avgValueSize, 0.0);
+    ASSERT_GE(stats.readAmp, 0.0);
+    ASSERT_GE(stats.hitRate, 0.0);
+}
+
+TEST_F(TidesDBTest, UpdateRuntimeConfig)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 64 * 1024 * 1024;
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    auto newConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    newConfig.writeBufferSize = 128 * 1024 * 1024;
+    newConfig.skipListMaxLevel = 16;
+    newConfig.bloomFPR = 0.001;
+
+    cf.updateRuntimeConfig(newConfig, false);
+
+    auto stats = cf.getStats();
+    if (stats.config.has_value())
+    {
+        ASSERT_EQ(stats.config->writeBufferSize, 128 * 1024 * 1024u);
+    }
+}
+
+TEST_F(TidesDBTest, DefaultConfig)
+{
+    auto defaultConfig = tidesdb::TidesDB::defaultConfig();
+
+    ASSERT_GE(defaultConfig.numFlushThreads, 0);
+    ASSERT_GE(defaultConfig.numCompactionThreads, 0);
+    ASSERT_GE(defaultConfig.blockCacheSize, 0u);
+    ASSERT_GE(defaultConfig.maxOpenSSTables, 0u);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
