@@ -52,7 +52,8 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.minLevels = cConfig.min_levels;
     config.dividingLevelOffset = cConfig.dividing_level_offset;
     config.klogValueThreshold = cConfig.klog_value_threshold;
-    config.compressionAlgorithm = static_cast<CompressionAlgorithm>(cConfig.compression_algo);
+    config.compressionAlgorithm =
+        static_cast<CompressionAlgorithm>(static_cast<int>(cConfig.compression_algorithm));
     config.enableBloomFilter = cConfig.enable_bloom_filter != 0;
     config.bloomFPR = cConfig.bloom_fpr;
     config.enableBlockIndexes = cConfig.enable_block_indexes != 0;
@@ -69,6 +70,79 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
 
     return config;
+}
+
+ColumnFamilyConfig ColumnFamilyConfig::loadFromIni(const std::string& iniFile,
+                                                   const std::string& sectionName)
+{
+    tidesdb_column_family_config_t cConfig;
+    int result = tidesdb_cf_config_load_from_ini(iniFile.c_str(), sectionName.c_str(), &cConfig);
+    checkResult(result, "failed to load config from INI");
+
+    ColumnFamilyConfig config;
+    config.writeBufferSize = cConfig.write_buffer_size;
+    config.levelSizeRatio = cConfig.level_size_ratio;
+    config.minLevels = cConfig.min_levels;
+    config.dividingLevelOffset = cConfig.dividing_level_offset;
+    config.klogValueThreshold = cConfig.klog_value_threshold;
+    config.compressionAlgorithm =
+        static_cast<CompressionAlgorithm>(static_cast<int>(cConfig.compression_algorithm));
+    config.enableBloomFilter = cConfig.enable_bloom_filter != 0;
+    config.bloomFPR = cConfig.bloom_fpr;
+    config.enableBlockIndexes = cConfig.enable_block_indexes != 0;
+    config.indexSampleRatio = cConfig.index_sample_ratio;
+    config.blockIndexPrefixLen = cConfig.block_index_prefix_len;
+    config.syncMode = static_cast<SyncMode>(cConfig.sync_mode);
+    config.syncIntervalUs = cConfig.sync_interval_us;
+    config.comparatorName = cConfig.comparator_name;
+    config.skipListMaxLevel = cConfig.skip_list_max_level;
+    config.skipListProbability = cConfig.skip_list_probability;
+    config.defaultIsolationLevel = static_cast<IsolationLevel>(cConfig.default_isolation_level);
+    config.minDiskSpace = cConfig.min_disk_space;
+    config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
+    config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
+
+    return config;
+}
+
+void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string& sectionName,
+                                   const ColumnFamilyConfig& config)
+{
+    tidesdb_column_family_config_t cConfig;
+    cConfig.write_buffer_size = config.writeBufferSize;
+    cConfig.level_size_ratio = config.levelSizeRatio;
+    cConfig.min_levels = config.minLevels;
+    cConfig.dividing_level_offset = config.dividingLevelOffset;
+    cConfig.klog_value_threshold = config.klogValueThreshold;
+    cConfig.compression_algorithm =
+        static_cast<::compression_algorithm>(config.compressionAlgorithm);
+    cConfig.enable_bloom_filter = config.enableBloomFilter ? 1 : 0;
+    cConfig.bloom_fpr = config.bloomFPR;
+    cConfig.enable_block_indexes = config.enableBlockIndexes ? 1 : 0;
+    cConfig.index_sample_ratio = config.indexSampleRatio;
+    cConfig.block_index_prefix_len = config.blockIndexPrefixLen;
+    cConfig.sync_mode = static_cast<int>(config.syncMode);
+    cConfig.sync_interval_us = config.syncIntervalUs;
+    cConfig.skip_list_max_level = config.skipListMaxLevel;
+    cConfig.skip_list_probability = config.skipListProbability;
+    cConfig.default_isolation_level =
+        static_cast<tidesdb_isolation_level_t>(config.defaultIsolationLevel);
+    cConfig.min_disk_space = config.minDiskSpace;
+    cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
+    cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+
+    std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
+    if (!config.comparatorName.empty())
+    {
+        std::strncpy(cConfig.comparator_name, config.comparatorName.c_str(),
+                     TDB_MAX_COMPARATOR_NAME - 1);
+    }
+    std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
+    cConfig.comparator_fn_cached = nullptr;
+    cConfig.comparator_ctx_cached = nullptr;
+
+    int result = tidesdb_cf_config_save_to_ini(iniFile.c_str(), sectionName.c_str(), &cConfig);
+    checkResult(result, "failed to save config to INI");
 }
 
 //-----------------------------------------------------------------------------
@@ -118,6 +192,23 @@ Stats ColumnFamily::getStats() const
         }
     }
 
+    // New stats fields
+    stats.totalKeys = cStats->total_keys;
+    stats.totalDataSize = cStats->total_data_size;
+    stats.avgKeySize = cStats->avg_key_size;
+    stats.avgValueSize = cStats->avg_value_size;
+    stats.readAmp = cStats->read_amp;
+    stats.hitRate = cStats->hit_rate;
+
+    if (cStats->num_levels > 0 && cStats->level_key_counts != nullptr)
+    {
+        stats.levelKeyCounts.resize(cStats->num_levels);
+        for (int i = 0; i < cStats->num_levels; ++i)
+        {
+            stats.levelKeyCounts[i] = cStats->level_key_counts[i];
+        }
+    }
+
     if (cStats->config != nullptr)
     {
         ColumnFamilyConfig cfConfig;
@@ -126,8 +217,8 @@ Stats ColumnFamily::getStats() const
         cfConfig.minLevels = cStats->config->min_levels;
         cfConfig.dividingLevelOffset = cStats->config->dividing_level_offset;
         cfConfig.klogValueThreshold = cStats->config->klog_value_threshold;
-        cfConfig.compressionAlgorithm =
-            static_cast<CompressionAlgorithm>(cStats->config->compression_algo);
+        cfConfig.compressionAlgorithm = static_cast<CompressionAlgorithm>(
+            static_cast<int>(cStats->config->compression_algorithm));
         cfConfig.enableBloomFilter = cStats->config->enable_bloom_filter != 0;
         cfConfig.bloomFPR = cStats->config->bloom_fpr;
         cfConfig.enableBlockIndexes = cStats->config->enable_block_indexes != 0;
@@ -160,6 +251,55 @@ void ColumnFamily::flushMemtable()
 {
     int result = tidesdb_flush_memtable(cf_);
     checkResult(result, "failed to flush memtable");
+}
+
+bool ColumnFamily::isFlushing() const
+{
+    return tidesdb_is_flushing(cf_) != 0;
+}
+
+bool ColumnFamily::isCompacting() const
+{
+    return tidesdb_is_compacting(cf_) != 0;
+}
+
+void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool persistToDisk)
+{
+    tidesdb_column_family_config_t cConfig;
+    cConfig.write_buffer_size = config.writeBufferSize;
+    cConfig.level_size_ratio = config.levelSizeRatio;
+    cConfig.min_levels = config.minLevels;
+    cConfig.dividing_level_offset = config.dividingLevelOffset;
+    cConfig.klog_value_threshold = config.klogValueThreshold;
+    cConfig.compression_algorithm =
+        static_cast<::compression_algorithm>(config.compressionAlgorithm);
+    cConfig.enable_bloom_filter = config.enableBloomFilter ? 1 : 0;
+    cConfig.bloom_fpr = config.bloomFPR;
+    cConfig.enable_block_indexes = config.enableBlockIndexes ? 1 : 0;
+    cConfig.index_sample_ratio = config.indexSampleRatio;
+    cConfig.block_index_prefix_len = config.blockIndexPrefixLen;
+    cConfig.sync_mode = static_cast<int>(config.syncMode);
+    cConfig.sync_interval_us = config.syncIntervalUs;
+    cConfig.skip_list_max_level = config.skipListMaxLevel;
+    cConfig.skip_list_probability = config.skipListProbability;
+    cConfig.default_isolation_level =
+        static_cast<tidesdb_isolation_level_t>(config.defaultIsolationLevel);
+    cConfig.min_disk_space = config.minDiskSpace;
+    cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
+    cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+
+    std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
+    if (!config.comparatorName.empty())
+    {
+        std::strncpy(cConfig.comparator_name, config.comparatorName.c_str(),
+                     TDB_MAX_COMPARATOR_NAME - 1);
+    }
+    std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
+    cConfig.comparator_fn_cached = nullptr;
+    cConfig.comparator_ctx_cached = nullptr;
+
+    int result = tidesdb_cf_update_runtime_config(cf_, &cConfig, persistToDisk ? 1 : 0);
+    checkResult(result, "failed to update runtime config");
 }
 
 //-----------------------------------------------------------------------------
@@ -449,7 +589,8 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     cConfig.min_levels = config.minLevels;
     cConfig.dividing_level_offset = config.dividingLevelOffset;
     cConfig.klog_value_threshold = config.klogValueThreshold;
-    cConfig.compression_algo = static_cast<compression_algorithm>(config.compressionAlgorithm);
+    cConfig.compression_algorithm =
+        static_cast<::compression_algorithm>(config.compressionAlgorithm);
     cConfig.enable_bloom_filter = config.enableBloomFilter ? 1 : 0;
     cConfig.bloom_fpr = config.bloomFPR;
     cConfig.enable_block_indexes = config.enableBlockIndexes ? 1 : 0;
@@ -551,11 +692,45 @@ CacheStats TidesDB::getCacheStats()
     return stats;
 }
 
-void TidesDB::registerComparator(const std::string& name, const std::string& ctxStr)
+void TidesDB::registerComparator(const std::string& name, tidesdb_comparator_fn fn,
+                                 const std::string& ctxStr, void* ctx)
 {
     const char* ctxStrPtr = ctxStr.empty() ? nullptr : ctxStr.c_str();
-    int result = tidesdb_register_comparator(db_, name.c_str(), nullptr, ctxStrPtr, nullptr);
+    int result = tidesdb_register_comparator(db_, name.c_str(), fn, ctxStrPtr, ctx);
     checkResult(result, "failed to register comparator");
+}
+
+void TidesDB::getComparator(const std::string& name, tidesdb_comparator_fn* fn, void** ctx)
+{
+    int result = tidesdb_get_comparator(db_, name.c_str(), fn, ctx);
+    checkResult(result, "failed to get comparator");
+}
+
+void TidesDB::renameColumnFamily(const std::string& oldName, const std::string& newName)
+{
+    int result = tidesdb_rename_column_family(db_, oldName.c_str(), newName.c_str());
+    checkResult(result, "failed to rename column family");
+}
+
+void TidesDB::backup(const std::string& dir)
+{
+    int result = tidesdb_backup(db_, const_cast<char*>(dir.c_str()));
+    checkResult(result, "failed to create backup");
+}
+
+Config TidesDB::defaultConfig()
+{
+    tidesdb_config_t cConfig = tidesdb_default_config();
+
+    Config config;
+    config.dbPath = cConfig.db_path ? cConfig.db_path : "";
+    config.numFlushThreads = cConfig.num_flush_threads;
+    config.numCompactionThreads = cConfig.num_compaction_threads;
+    config.logLevel = static_cast<LogLevel>(cConfig.log_level);
+    config.blockCacheSize = cConfig.block_cache_size;
+    config.maxOpenSSTables = cConfig.max_open_sstables;
+
+    return config;
 }
 
 }  // namespace tidesdb

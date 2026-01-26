@@ -41,10 +41,13 @@ namespace tidesdb
  */
 enum class CompressionAlgorithm
 {
-    None = NO_COMPRESSION,
-    LZ4 = LZ4_COMPRESSION,
-    Zstd = ZSTD_COMPRESSION,
-    LZ4Fast = LZ4_FAST_COMRESSION
+    None = TDB_COMPRESS_NONE,
+#ifndef __sun
+    Snappy = TDB_COMPRESS_SNAPPY,
+#endif
+    LZ4 = TDB_COMPRESS_LZ4,
+    Zstd = TDB_COMPRESS_ZSTD,
+    LZ4Fast = TDB_COMPRESS_LZ4_FAST
 };
 
 /**
@@ -190,6 +193,24 @@ struct ColumnFamilyConfig
      * @brief Get default column family configuration from TidesDB
      */
     static ColumnFamilyConfig defaultConfig();
+
+    /**
+     * @brief Load column family configuration from an INI file
+     * @param iniFile Path to the INI file
+     * @param sectionName Section name in the INI file
+     * @return Loaded configuration
+     */
+    static ColumnFamilyConfig loadFromIni(const std::string& iniFile,
+                                          const std::string& sectionName);
+
+    /**
+     * @brief Save column family configuration to an INI file
+     * @param iniFile Path to the INI file
+     * @param sectionName Section name in the INI file
+     * @param config Configuration to save
+     */
+    static void saveToIni(const std::string& iniFile, const std::string& sectionName,
+                          const ColumnFamilyConfig& config);
 };
 
 /**
@@ -215,6 +236,13 @@ struct Stats
     std::vector<std::size_t> levelSizes;
     std::vector<int> levelNumSSTables;
     std::optional<ColumnFamilyConfig> config;
+    std::uint64_t totalKeys = 0;
+    std::uint64_t totalDataSize = 0;
+    double avgKeySize = 0.0;
+    double avgValueSize = 0.0;
+    std::vector<std::uint64_t> levelKeyCounts;
+    double readAmp = 0.0;
+    double hitRate = 0.0;
 };
 
 /**
@@ -257,6 +285,25 @@ class ColumnFamily
      * @brief Manually trigger memtable flush
      */
     void flushMemtable();
+
+    /**
+     * @brief Check if a flush operation is in progress
+     * @return true if flushing, false otherwise
+     */
+    [[nodiscard]] bool isFlushing() const;
+
+    /**
+     * @brief Check if a compaction operation is in progress
+     * @return true if compacting, false otherwise
+     */
+    [[nodiscard]] bool isCompacting() const;
+
+    /**
+     * @brief Update runtime-safe configuration settings
+     * @param config New configuration (only runtime-safe fields are applied)
+     * @param persistToDisk If true, save changes to config.ini
+     */
+    void updateRuntimeConfig(const ColumnFamilyConfig& config, bool persistToDisk = true);
 
     /**
      * @brief Get the underlying C handle (for internal use)
@@ -503,9 +550,39 @@ class TidesDB
     /**
      * @brief Register a custom comparator
      * @param name Comparator name
+     * @param fn Comparator function
      * @param ctxStr Context string (optional)
+     * @param ctx Context pointer (optional)
      */
-    void registerComparator(const std::string& name, const std::string& ctxStr = "");
+    void registerComparator(const std::string& name, tidesdb_comparator_fn fn = nullptr,
+                            const std::string& ctxStr = "", void* ctx = nullptr);
+
+    /**
+     * @brief Get a registered comparator
+     * @param name Comparator name
+     * @param fn Output comparator function
+     * @param ctx Output context pointer
+     */
+    void getComparator(const std::string& name, tidesdb_comparator_fn* fn, void** ctx);
+
+    /**
+     * @brief Rename a column family
+     * @param oldName Current name of the column family
+     * @param newName New name for the column family
+     */
+    void renameColumnFamily(const std::string& oldName, const std::string& newName);
+
+    /**
+     * @brief Create a backup of the database
+     * @param dir Backup directory (must be empty or non-existent)
+     */
+    void backup(const std::string& dir);
+
+    /**
+     * @brief Get default database configuration
+     * @return Default Config struct
+     */
+    static Config defaultConfig();
 
    private:
     tidesdb_t* db_ = nullptr;
