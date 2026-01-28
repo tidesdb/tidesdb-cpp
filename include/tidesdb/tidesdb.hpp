@@ -224,6 +224,8 @@ struct Config
     LogLevel logLevel = LogLevel::Info;
     std::size_t blockCacheSize = 64 * 1024 * 1024;
     std::size_t maxOpenSSTables = 256;
+    bool logToFile = false;
+    std::size_t logTruncationAt = 24 * 1024 * 1024;
 };
 
 /**
