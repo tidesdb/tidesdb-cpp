@@ -548,6 +548,8 @@ TidesDB::TidesDB(const Config& config)
     cConfig.log_level = static_cast<tidesdb_log_level_t>(config.logLevel);
     cConfig.block_cache_size = config.blockCacheSize;
     cConfig.max_open_sstables = config.maxOpenSSTables;
+    cConfig.log_to_file = config.logToFile ? 1 : 0;
+    cConfig.log_truncation_at = config.logTruncationAt;
 
     int result = tidesdb_open(&cConfig, &db_);
     checkResult(result, "failed to open database");
@@ -729,6 +731,8 @@ Config TidesDB::defaultConfig()
     config.logLevel = static_cast<LogLevel>(cConfig.log_level);
     config.blockCacheSize = cConfig.block_cache_size;
     config.maxOpenSSTables = cConfig.max_open_sstables;
+    config.logToFile = cConfig.log_to_file != 0;
+    config.logTruncationAt = cConfig.log_truncation_at;
 
     return config;
 }
