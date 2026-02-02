@@ -188,6 +188,7 @@ struct ColumnFamilyConfig
     std::uint64_t minDiskSpace = 100 * 1024 * 1024;
     int l1FileCountTrigger = 4;
     int l0QueueStallThreshold = 20;
+    bool useBtree = false;  ///< Use B+tree format for klog (default: false = block-based)
 
     /**
      * @brief Get default column family configuration from TidesDB
@@ -245,6 +246,10 @@ struct Stats
     std::vector<std::uint64_t> levelKeyCounts;
     double readAmp = 0.0;
     double hitRate = 0.0;
+    bool useBtree = false;              ///< Whether column family uses B+tree format
+    std::uint64_t btreeTotalNodes = 0;  ///< Total B+tree nodes across all SSTables
+    std::uint32_t btreeMaxHeight = 0;   ///< Maximum tree height across all SSTables
+    double btreeAvgHeight = 0.0;        ///< Average tree height across all SSTables
 };
 
 /**

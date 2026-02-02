@@ -68,6 +68,7 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.minDiskSpace = cConfig.min_disk_space;
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
+    config.useBtree = cConfig.use_btree != 0;
 
     return config;
 }
@@ -101,6 +102,7 @@ ColumnFamilyConfig ColumnFamilyConfig::loadFromIni(const std::string& iniFile,
     config.minDiskSpace = cConfig.min_disk_space;
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
+    config.useBtree = cConfig.use_btree != 0;
 
     return config;
 }
@@ -130,6 +132,7 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+    cConfig.use_btree = config.useBtree ? 1 : 0;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
     if (!config.comparatorName.empty())
@@ -200,6 +203,12 @@ Stats ColumnFamily::getStats() const
     stats.readAmp = cStats->read_amp;
     stats.hitRate = cStats->hit_rate;
 
+    // B+tree stats
+    stats.useBtree = cStats->use_btree != 0;
+    stats.btreeTotalNodes = cStats->btree_total_nodes;
+    stats.btreeMaxHeight = cStats->btree_max_height;
+    stats.btreeAvgHeight = cStats->btree_avg_height;
+
     if (cStats->num_levels > 0 && cStats->level_key_counts != nullptr)
     {
         stats.levelKeyCounts.resize(cStats->num_levels);
@@ -234,6 +243,7 @@ Stats ColumnFamily::getStats() const
         cfConfig.minDiskSpace = cStats->config->min_disk_space;
         cfConfig.l1FileCountTrigger = cStats->config->l1_file_count_trigger;
         cfConfig.l0QueueStallThreshold = cStats->config->l0_queue_stall_threshold;
+        cfConfig.useBtree = cStats->config->use_btree != 0;
         stats.config = cfConfig;
     }
 
@@ -287,6 +297,7 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+    cConfig.use_btree = config.useBtree ? 1 : 0;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
     if (!config.comparatorName.empty())
@@ -607,6 +618,7 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+    cConfig.use_btree = config.useBtree ? 1 : 0;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
     if (!config.comparatorName.empty())

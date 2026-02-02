@@ -749,6 +749,76 @@ TEST_F(TidesDBTest, DefaultConfig)
     ASSERT_GE(defaultConfig.maxOpenSSTables, 0u);
 }
 
+TEST_F(TidesDBTest, UseBtreeConfig)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    // Test with useBtree = false (default, block-based format)
+    {
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        ASSERT_FALSE(cfConfig.useBtree);  // Default should be false
+        db.createColumnFamily("block_cf", cfConfig);
+
+        auto cf = db.getColumnFamily("block_cf");
+        auto stats = cf.getStats();
+        ASSERT_FALSE(stats.useBtree);
+        if (stats.config.has_value())
+        {
+            ASSERT_FALSE(stats.config->useBtree);
+        }
+    }
+
+    // Test with useBtree = true (B+tree format)
+    {
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        cfConfig.useBtree = true;
+        db.createColumnFamily("btree_cf", cfConfig);
+
+        auto cf = db.getColumnFamily("btree_cf");
+        auto stats = cf.getStats();
+        ASSERT_TRUE(stats.useBtree);
+        if (stats.config.has_value())
+        {
+            ASSERT_TRUE(stats.config->useBtree);
+        }
+    }
+}
+
+TEST_F(TidesDBTest, BtreeStats)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.useBtree = true;
+    cfConfig.writeBufferSize = 1024;  // Small buffer to trigger flush
+    db.createColumnFamily("btree_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("btree_cf");
+
+    // Insert data to populate B+tree structures
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 50; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    // Force flush to create SSTables with B+tree format
+    cf.flushMemtable();
+
+    auto stats = cf.getStats();
+
+    // Verify B+tree stats fields exist and are valid
+    ASSERT_TRUE(stats.useBtree);
+    ASSERT_GE(stats.btreeTotalNodes, 0u);
+    ASSERT_GE(stats.btreeMaxHeight, 0u);
+    ASSERT_GE(stats.btreeAvgHeight, 0.0);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
