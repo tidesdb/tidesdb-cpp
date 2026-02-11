@@ -819,6 +819,189 @@ TEST_F(TidesDBTest, BtreeStats)
     ASSERT_GE(stats.btreeAvgHeight, 0.0);
 }
 
+TEST_F(TidesDBTest, CloneColumnFamily)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("source_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("source_cf");
+
+    // Write data to source
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.put(cf, "key2", "value2", -1);
+        txn.put(cf, "key3", "value3", -1);
+        txn.commit();
+    }
+
+    // Clone the column family
+    db.cloneColumnFamily("source_cf", "cloned_cf");
+
+    // Verify cloned CF exists and has the same data
+    auto clonedCf = db.getColumnFamily("cloned_cf");
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 1; i <= 3; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string expectedValue = "value" + std::to_string(i);
+
+            auto value = txn.get(clonedCf, key);
+            std::string valueStr(value.begin(), value.end());
+            ASSERT_EQ(valueStr, expectedValue);
+        }
+    }
+
+    // Verify source CF still exists and is independent
+    auto sourceCf = db.getColumnFamily("source_cf");
+    {
+        auto txn = db.beginTransaction();
+        auto value = txn.get(sourceCf, "key1");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "value1");
+    }
+
+    // Verify independence: write to clone doesn't affect source
+    {
+        auto txn = db.beginTransaction();
+        txn.put(clonedCf, "clone_only_key", "clone_only_value", -1);
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        EXPECT_THROW(txn.get(sourceCf, "clone_only_key"), tidesdb::Exception);
+    }
+}
+
+TEST_F(TidesDBTest, CloneColumnFamilyErrors)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("existing_cf", cfConfig);
+
+    // Clone non-existent source
+    EXPECT_THROW(db.cloneColumnFamily("nonexistent_cf", "new_cf"), tidesdb::Exception);
+
+    // Clone to existing destination
+    EXPECT_THROW(db.cloneColumnFamily("existing_cf", "existing_cf"), tidesdb::Exception);
+}
+
+TEST_F(TidesDBTest, TransactionReset)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Begin, use, commit, then reset and reuse
+    auto txn = db.beginTransaction();
+
+    // First batch of work
+    txn.put(cf, "key1", "value1", -1);
+    txn.commit();
+
+    // Reset instead of free + begin
+    txn.reset(tidesdb::IsolationLevel::ReadCommitted);
+
+    // Second batch of work using the same transaction
+    txn.put(cf, "key2", "value2", -1);
+    txn.commit();
+
+    // Verify both batches were committed
+    {
+        auto readTxn = db.beginTransaction();
+        auto value1 = readTxn.get(cf, "key1");
+        std::string value1Str(value1.begin(), value1.end());
+        ASSERT_EQ(value1Str, "value1");
+
+        auto value2 = readTxn.get(cf, "key2");
+        std::string value2Str(value2.begin(), value2.end());
+        ASSERT_EQ(value2Str, "value2");
+    }
+}
+
+TEST_F(TidesDBTest, TransactionResetWithDifferentIsolation)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Start with ReadCommitted
+    auto txn = db.beginTransaction(tidesdb::IsolationLevel::ReadCommitted);
+    txn.put(cf, "key1", "value1", -1);
+    txn.commit();
+
+    // Reset to RepeatableRead
+    txn.reset(tidesdb::IsolationLevel::RepeatableRead);
+    txn.put(cf, "key2", "value2", -1);
+    txn.commit();
+
+    // Reset to Snapshot
+    txn.reset(tidesdb::IsolationLevel::Snapshot);
+    txn.put(cf, "key3", "value3", -1);
+    txn.commit();
+
+    // Verify all writes succeeded
+    {
+        auto readTxn = db.beginTransaction();
+        for (int i = 1; i <= 3; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string expectedValue = "value" + std::to_string(i);
+
+            auto value = readTxn.get(cf, key);
+            std::string valueStr(value.begin(), value.end());
+            ASSERT_EQ(valueStr, expectedValue);
+        }
+    }
+}
+
+TEST_F(TidesDBTest, TransactionResetAfterRollback)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    auto txn = db.beginTransaction();
+
+    // Put and rollback
+    txn.put(cf, "rolled_back_key", "rolled_back_value", -1);
+    txn.rollback();
+
+    // Reset after rollback
+    txn.reset(tidesdb::IsolationLevel::ReadCommitted);
+
+    // New work after reset
+    txn.put(cf, "new_key", "new_value", -1);
+    txn.commit();
+
+    // Verify rolled back key doesn't exist, new key does
+    {
+        auto readTxn = db.beginTransaction();
+        EXPECT_THROW(readTxn.get(cf, "rolled_back_key"), tidesdb::Exception);
+    }
+
+    {
+        auto readTxn = db.beginTransaction();
+        auto value = readTxn.get(cf, "new_key");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "new_value");
+    }
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

@@ -474,6 +474,12 @@ class Transaction
      */
     [[nodiscard]] Iterator newIterator(ColumnFamily& cf);
 
+    /**
+     * @brief Reset a committed or aborted transaction for reuse
+     * @param isolation New isolation level for the reset transaction
+     */
+    void reset(IsolationLevel isolation);
+
    private:
     friend class TidesDB;
     explicit Transaction(tidesdb_txn_t* txn) : txn_(txn)
@@ -578,6 +584,13 @@ class TidesDB
      * @param newName New name for the column family
      */
     void renameColumnFamily(const std::string& oldName, const std::string& newName);
+
+    /**
+     * @brief Clone a column family
+     * @param srcName Source column family name
+     * @param dstName Destination column family name
+     */
+    void cloneColumnFamily(const std::string& srcName, const std::string& dstName);
 
     /**
      * @brief Create a backup of the database

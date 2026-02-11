@@ -546,6 +546,12 @@ Iterator Transaction::newIterator(ColumnFamily& cf)
     return Iterator(iter);
 }
 
+void Transaction::reset(IsolationLevel isolation)
+{
+    int result = tidesdb_txn_reset(txn_, static_cast<tidesdb_isolation_level_t>(isolation));
+    checkResult(result, "failed to reset transaction");
+}
+
 //-----------------------------------------------------------------------------
 // TidesDB
 //-----------------------------------------------------------------------------
@@ -724,6 +730,12 @@ void TidesDB::renameColumnFamily(const std::string& oldName, const std::string& 
 {
     int result = tidesdb_rename_column_family(db_, oldName.c_str(), newName.c_str());
     checkResult(result, "failed to rename column family");
+}
+
+void TidesDB::cloneColumnFamily(const std::string& srcName, const std::string& dstName)
+{
+    int result = tidesdb_clone_column_family(db_, srcName.c_str(), dstName.c_str());
+    checkResult(result, "failed to clone column family");
 }
 
 void TidesDB::backup(const std::string& dir)
