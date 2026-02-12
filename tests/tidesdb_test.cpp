@@ -683,6 +683,49 @@ TEST_F(TidesDBTest, Backup)
     fs::remove_all(backupPath);
 }
 
+TEST_F(TidesDBTest, Checkpoint)
+{
+    std::string checkpointPath = testDbPath_ + "_checkpoint";
+    fs::remove_all(checkpointPath);
+
+    {
+        tidesdb::TidesDB db(getConfig());
+
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        db.createColumnFamily("test_cf", cfConfig);
+
+        auto cf = db.getColumnFamily("test_cf");
+        {
+            auto txn = db.beginTransaction();
+            txn.put(cf, "checkpoint_key", "checkpoint_value", -1);
+            txn.commit();
+        }
+
+        db.checkpoint(checkpointPath);
+    }
+
+    ASSERT_TRUE(fs::exists(checkpointPath));
+
+    {
+        tidesdb::Config config;
+        config.dbPath = checkpointPath;
+        config.numFlushThreads = 2;
+        config.numCompactionThreads = 2;
+        config.logLevel = tidesdb::LogLevel::Info;
+        config.blockCacheSize = 64 * 1024 * 1024;
+        config.maxOpenSSTables = 256;
+
+        tidesdb::TidesDB checkpointDb(config);
+        auto cf = checkpointDb.getColumnFamily("test_cf");
+        auto txn = checkpointDb.beginTransaction();
+        auto value = txn.get(cf, "checkpoint_key");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "checkpoint_value");
+    }
+
+    fs::remove_all(checkpointPath);
+}
+
 TEST_F(TidesDBTest, ExtendedStats)
 {
     tidesdb::TidesDB db(getConfig());
