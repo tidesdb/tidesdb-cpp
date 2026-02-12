@@ -599,6 +599,12 @@ class TidesDB
     void backup(const std::string& dir);
 
     /**
+     * @brief Create a lightweight checkpoint of the database using hard links
+     * @param dir Checkpoint directory (must be empty or non-existent)
+     */
+    void checkpoint(const std::string& dir);
+
+    /**
      * @brief Get default database configuration
      * @return Default Config struct
      */

@@ -744,6 +744,12 @@ void TidesDB::backup(const std::string& dir)
     checkResult(result, "failed to create backup");
 }
 
+void TidesDB::checkpoint(const std::string& dir)
+{
+    int result = tidesdb_checkpoint(db_, dir.c_str());
+    checkResult(result, "failed to create checkpoint");
+}
+
 Config TidesDB::defaultConfig()
 {
     tidesdb_config_t cConfig = tidesdb_default_config();
