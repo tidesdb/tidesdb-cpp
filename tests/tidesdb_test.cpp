@@ -934,6 +934,100 @@ TEST_F(TidesDBTest, CloneColumnFamilyErrors)
     EXPECT_THROW(db.cloneColumnFamily("existing_cf", "existing_cf"), tidesdb::Exception);
 }
 
+TEST_F(TidesDBTest, RangeCost)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;  // Small buffer to trigger flush
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Insert data across a key range
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 100; ++i)
+        {
+            char key[32], value[64];
+            std::snprintf(key, sizeof(key), "user:%04d", i);
+            std::snprintf(value, sizeof(value), "data_%04d", i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    // Flush to create SSTables so range cost has data to estimate
+    cf.flushMemtable();
+
+    // Estimate cost for two ranges
+    double costA = cf.rangeCost("user:0000", "user:0049");
+    double costB = cf.rangeCost("user:0000", "user:0099");
+
+    // Both costs should be non-negative
+    ASSERT_GE(costA, 0.0);
+    ASSERT_GE(costB, 0.0);
+
+    // Larger range should have >= cost than smaller range
+    ASSERT_GE(costB, costA);
+}
+
+TEST_F(TidesDBTest, RangeCostByteVector)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Insert some data
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 10; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    std::vector<std::uint8_t> keyA = {'k', 'e', 'y', '0'};
+    std::vector<std::uint8_t> keyB = {'k', 'e', 'y', '9'};
+
+    double cost = cf.rangeCost(keyA, keyB);
+    ASSERT_GE(cost, 0.0);
+}
+
+TEST_F(TidesDBTest, RangeCostKeyOrderIrrelevant)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Insert some data
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 10; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    // Key order should not matter per the C API docs
+    double costAB = cf.rangeCost("key0", "key9");
+    double costBA = cf.rangeCost("key9", "key0");
+
+    ASSERT_DOUBLE_EQ(costAB, costBA);
+}
+
 TEST_F(TidesDBTest, TransactionReset)
 {
     tidesdb::TidesDB db(getConfig());
