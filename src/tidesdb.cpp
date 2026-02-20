@@ -273,6 +273,25 @@ bool ColumnFamily::isCompacting() const
     return tidesdb_is_compacting(cf_) != 0;
 }
 
+double ColumnFamily::rangeCost(std::string_view keyA, std::string_view keyB) const
+{
+    double cost = 0.0;
+    int result =
+        tidesdb_range_cost(cf_, reinterpret_cast<const uint8_t*>(keyA.data()), keyA.size(),
+                           reinterpret_cast<const uint8_t*>(keyB.data()), keyB.size(), &cost);
+    checkResult(result, "failed to estimate range cost");
+    return cost;
+}
+
+double ColumnFamily::rangeCost(const std::vector<std::uint8_t>& keyA,
+                               const std::vector<std::uint8_t>& keyB) const
+{
+    double cost = 0.0;
+    int result = tidesdb_range_cost(cf_, keyA.data(), keyA.size(), keyB.data(), keyB.size(), &cost);
+    checkResult(result, "failed to estimate range cost");
+    return cost;
+}
+
 void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool persistToDisk)
 {
     tidesdb_column_family_config_t cConfig;

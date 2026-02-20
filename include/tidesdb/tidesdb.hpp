@@ -306,6 +306,23 @@ class ColumnFamily
     [[nodiscard]] bool isCompacting() const;
 
     /**
+     * @brief Estimate the computational cost of iterating between two keys
+     * @param keyA First key (bound of range)
+     * @param keyB Second key (bound of range)
+     * @return Estimated traversal cost (higher = more expensive, relative scalar)
+     */
+    [[nodiscard]] double rangeCost(std::string_view keyA, std::string_view keyB) const;
+
+    /**
+     * @brief Estimate the computational cost of iterating between two keys (byte vector overload)
+     * @param keyA First key (bound of range)
+     * @param keyB Second key (bound of range)
+     * @return Estimated traversal cost (higher = more expensive, relative scalar)
+     */
+    [[nodiscard]] double rangeCost(const std::vector<std::uint8_t>& keyA,
+                                   const std::vector<std::uint8_t>& keyB) const;
+
+    /**
      * @brief Update runtime-safe configuration settings
      * @param config New configuration (only runtime-safe fields are applied)
      * @param persistToDisk If true, save changes to config.ini
