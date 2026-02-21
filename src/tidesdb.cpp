@@ -143,6 +143,8 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
     std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
     cConfig.comparator_fn_cached = nullptr;
     cConfig.comparator_ctx_cached = nullptr;
+    cConfig.commit_hook_fn = nullptr;
+    cConfig.commit_hook_ctx = nullptr;
 
     int result = tidesdb_cf_config_save_to_ini(iniFile.c_str(), sectionName.c_str(), &cConfig);
     checkResult(result, "failed to save config to INI");
@@ -292,6 +294,18 @@ double ColumnFamily::rangeCost(const std::vector<std::uint8_t>& keyA,
     return cost;
 }
 
+void ColumnFamily::setCommitHook(tidesdb_commit_hook_fn fn, void* ctx)
+{
+    int result = tidesdb_cf_set_commit_hook(cf_, fn, ctx);
+    checkResult(result, "failed to set commit hook");
+}
+
+void ColumnFamily::clearCommitHook()
+{
+    int result = tidesdb_cf_set_commit_hook(cf_, nullptr, nullptr);
+    checkResult(result, "failed to clear commit hook");
+}
+
 void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool persistToDisk)
 {
     tidesdb_column_family_config_t cConfig;
@@ -327,6 +341,8 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
     std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
     cConfig.comparator_fn_cached = nullptr;
     cConfig.comparator_ctx_cached = nullptr;
+    cConfig.commit_hook_fn = nullptr;
+    cConfig.commit_hook_ctx = nullptr;
 
     int result = tidesdb_cf_update_runtime_config(cf_, &cConfig, persistToDisk ? 1 : 0);
     checkResult(result, "failed to update runtime config");
@@ -654,6 +670,8 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
     cConfig.comparator_fn_cached = nullptr;
     cConfig.comparator_ctx_cached = nullptr;
+    cConfig.commit_hook_fn = config.commitHookFn;
+    cConfig.commit_hook_ctx = config.commitHookCtx;
 
     int result = tidesdb_create_column_family(db_, name.c_str(), &cConfig);
     checkResult(result, "failed to create column family");

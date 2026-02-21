@@ -19,9 +19,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1137,6 +1139,202 @@ TEST_F(TidesDBTest, TransactionResetAfterRollback)
         std::string valueStr(value.begin(), value.end());
         ASSERT_EQ(valueStr, "new_value");
     }
+}
+
+// Commit hook test helpers
+struct HookTestCtx
+{
+    std::atomic<int> callCount{0};
+    std::atomic<int> totalOps{0};
+    std::atomic<uint64_t> lastCommitSeq{0};
+    std::mutex mu;
+    std::vector<std::string> capturedKeys;
+};
+
+static int testCommitHook(const tidesdb_commit_op_t* ops, int num_ops, uint64_t commit_seq,
+                          void* ctx)
+{
+    auto* hctx = static_cast<HookTestCtx*>(ctx);
+    hctx->callCount.fetch_add(1);
+    hctx->totalOps.fetch_add(num_ops);
+    hctx->lastCommitSeq.store(commit_seq);
+
+    std::lock_guard<std::mutex> lock(hctx->mu);
+    for (int i = 0; i < num_ops; ++i)
+    {
+        hctx->capturedKeys.emplace_back(reinterpret_cast<const char*>(ops[i].key), ops[i].key_size);
+    }
+    return 0;
+}
+
+TEST_F(TidesDBTest, CommitHookBasic)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    HookTestCtx hookCtx;
+    cf.setCommitHook(testCommitHook, &hookCtx);
+
+    // Commit a transaction -- hook should fire
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.put(cf, "key2", "value2", -1);
+        txn.commit();
+    }
+
+    ASSERT_GE(hookCtx.callCount.load(), 1);
+    ASSERT_GE(hookCtx.totalOps.load(), 2);
+    ASSERT_GT(hookCtx.lastCommitSeq.load(), 0u);
+
+    // Verify captured keys
+    {
+        std::lock_guard<std::mutex> lock(hookCtx.mu);
+        bool foundKey1 = false, foundKey2 = false;
+        for (const auto& k : hookCtx.capturedKeys)
+        {
+            if (k == "key1") foundKey1 = true;
+            if (k == "key2") foundKey2 = true;
+        }
+        ASSERT_TRUE(foundKey1);
+        ASSERT_TRUE(foundKey2);
+    }
+}
+
+TEST_F(TidesDBTest, CommitHookClear)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    HookTestCtx hookCtx;
+    cf.setCommitHook(testCommitHook, &hookCtx);
+
+    // First commit -- hook fires
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.commit();
+    }
+
+    int countAfterFirst = hookCtx.callCount.load();
+    ASSERT_GE(countAfterFirst, 1);
+
+    // Clear the hook
+    cf.clearCommitHook();
+
+    // Second commit -- hook should NOT fire
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key2", "value2", -1);
+        txn.commit();
+    }
+
+    ASSERT_EQ(hookCtx.callCount.load(), countAfterFirst);
+}
+
+TEST_F(TidesDBTest, CommitHookDeleteOps)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Insert data first
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "del_key", "del_value", -1);
+        txn.commit();
+    }
+
+    HookTestCtx hookCtx;
+    cf.setCommitHook(testCommitHook, &hookCtx);
+
+    // Delete the key -- hook should capture the delete
+    {
+        auto txn = db.beginTransaction();
+        txn.del(cf, "del_key");
+        txn.commit();
+    }
+
+    ASSERT_GE(hookCtx.callCount.load(), 1);
+    ASSERT_GE(hookCtx.totalOps.load(), 1);
+}
+
+TEST_F(TidesDBTest, CommitHookMonotonicSeq)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Custom hook that records all commit sequences
+    struct SeqCtx
+    {
+        std::mutex mu;
+        std::vector<uint64_t> seqs;
+    } seqCtx;
+
+    auto seqHook = [](const tidesdb_commit_op_t*, int, uint64_t commit_seq, void* ctx) -> int
+    {
+        auto* sctx = static_cast<SeqCtx*>(ctx);
+        std::lock_guard<std::mutex> lock(sctx->mu);
+        sctx->seqs.push_back(commit_seq);
+        return 0;
+    };
+
+    cf.setCommitHook(seqHook, &seqCtx);
+
+    // Multiple commits
+    for (int i = 0; i < 5; ++i)
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key" + std::to_string(i), "value" + std::to_string(i), -1);
+        txn.commit();
+    }
+
+    // Verify monotonically increasing sequence numbers
+    std::lock_guard<std::mutex> lock(seqCtx.mu);
+    ASSERT_GE(seqCtx.seqs.size(), 5u);
+    for (size_t i = 1; i < seqCtx.seqs.size(); ++i)
+    {
+        ASSERT_GT(seqCtx.seqs[i], seqCtx.seqs[i - 1]);
+    }
+}
+
+TEST_F(TidesDBTest, CommitHookViaConfig)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    HookTestCtx hookCtx;
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.commitHookFn = testCommitHook;
+    cfConfig.commitHookCtx = &hookCtx;
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Commit -- hook should already be active from config
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.commit();
+    }
+
+    ASSERT_GE(hookCtx.callCount.load(), 1);
+    ASSERT_GE(hookCtx.totalOps.load(), 1);
 }
 
 int main(int argc, char** argv)

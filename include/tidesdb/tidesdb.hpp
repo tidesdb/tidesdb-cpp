@@ -189,6 +189,9 @@ struct ColumnFamilyConfig
     int l1FileCountTrigger = 4;
     int l0QueueStallThreshold = 20;
     bool useBtree = false;  ///< Use B+tree format for klog (default: false = block-based)
+    tidesdb_commit_hook_fn commitHookFn =
+        nullptr;                    ///< Optional commit hook callback (runtime-only)
+    void* commitHookCtx = nullptr;  ///< Optional user context for commit hook (runtime-only)
 
     /**
      * @brief Get default column family configuration from TidesDB
@@ -321,6 +324,18 @@ class ColumnFamily
      */
     [[nodiscard]] double rangeCost(const std::vector<std::uint8_t>& keyA,
                                    const std::vector<std::uint8_t>& keyB) const;
+
+    /**
+     * @brief Set or replace the commit hook for this column family
+     * @param fn Commit hook callback
+     * @param ctx User-provided context passed to the callback
+     */
+    void setCommitHook(tidesdb_commit_hook_fn fn, void* ctx);
+
+    /**
+     * @brief Clear (disable) the commit hook for this column family
+     */
+    void clearCommitHook();
 
     /**
      * @brief Update runtime-safe configuration settings
