@@ -602,6 +602,7 @@ TidesDB::TidesDB(const Config& config)
     cConfig.max_open_sstables = config.maxOpenSSTables;
     cConfig.log_to_file = config.logToFile ? 1 : 0;
     cConfig.log_truncation_at = config.logTruncationAt;
+    cConfig.max_memory_usage = config.maxMemoryUsage;
 
     int result = tidesdb_open(&cConfig, &db_);
     checkResult(result, "failed to open database");
@@ -800,6 +801,7 @@ Config TidesDB::defaultConfig()
     config.maxOpenSSTables = cConfig.max_open_sstables;
     config.logToFile = cConfig.log_to_file != 0;
     config.logTruncationAt = cConfig.log_truncation_at;
+    config.maxMemoryUsage = cConfig.max_memory_usage;
 
     return config;
 }

@@ -230,6 +230,7 @@ struct Config
     std::size_t maxOpenSSTables = 256;
     bool logToFile = false;
     std::size_t logTruncationAt = 24 * 1024 * 1024;
+    std::size_t maxMemoryUsage = 0;  ///< Global memory limit in bytes (0 = auto)
 };
 
 /**
