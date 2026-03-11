@@ -497,6 +497,53 @@ TEST_F(TidesDBTest, FlushMemtable)
     cf.flushMemtable();
 }
 
+TEST_F(TidesDBTest, PurgeColumnFamily)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 100; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    ASSERT_NO_THROW(cf.purge());
+}
+
+TEST_F(TidesDBTest, PurgeDatabase)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("cf1", cfConfig);
+    db.createColumnFamily("cf2", cfConfig);
+
+    auto cf1 = db.getColumnFamily("cf1");
+    auto cf2 = db.getColumnFamily("cf2");
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 50; ++i)
+        {
+            txn.put(cf1, "k1_" + std::to_string(i), "v1_" + std::to_string(i), -1);
+            txn.put(cf2, "k2_" + std::to_string(i), "v2_" + std::to_string(i), -1);
+        }
+        txn.commit();
+    }
+
+    ASSERT_NO_THROW(db.purge());
+}
+
 TEST_F(TidesDBTest, NonExistentColumnFamily)
 {
     tidesdb::TidesDB db(getConfig());
