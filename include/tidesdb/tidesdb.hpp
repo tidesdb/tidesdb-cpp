@@ -298,6 +298,15 @@ class ColumnFamily
     void flushMemtable();
 
     /**
+     * @brief Synchronously flush memtable and run aggressive compaction to completion
+     *
+     * Blocks until all flush and compaction I/O is complete. Use before backup,
+     * after bulk deletes, or during maintenance windows where a guaranteed clean
+     * on-disk state is required.
+     */
+    void purge();
+
+    /**
      * @brief Check if a flush operation is in progress
      * @return true if flushing, false otherwise
      */
@@ -636,6 +645,15 @@ class TidesDB
      * @param dir Checkpoint directory (must be empty or non-existent)
      */
     void checkpoint(const std::string& dir);
+
+    /**
+     * @brief Synchronously flush and aggressively compact all column families
+     *
+     * Calls purge() on each column family and then drains the global flush and
+     * compaction queues. Blocks until all work is complete. Throws on the first
+     * column family that fails.
+     */
+    void purge();
 
     /**
      * @brief Get default database configuration

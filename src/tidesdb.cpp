@@ -265,6 +265,12 @@ void ColumnFamily::flushMemtable()
     checkResult(result, "failed to flush memtable");
 }
 
+void ColumnFamily::purge()
+{
+    int result = tidesdb_purge_cf(cf_);
+    checkResult(result, "failed to purge column family");
+}
+
 bool ColumnFamily::isFlushing() const
 {
     return tidesdb_is_flushing(cf_) != 0;
@@ -786,6 +792,12 @@ void TidesDB::checkpoint(const std::string& dir)
 {
     int result = tidesdb_checkpoint(db_, dir.c_str());
     checkResult(result, "failed to create checkpoint");
+}
+
+void TidesDB::purge()
+{
+    int result = tidesdb_purge(db_);
+    checkResult(result, "failed to purge database");
 }
 
 Config TidesDB::defaultConfig()
