@@ -257,6 +257,28 @@ struct Stats
 };
 
 /**
+ * @brief Database-level statistics
+ */
+struct DbStats
+{
+    int numColumnFamilies = 0;
+    std::uint64_t totalMemory = 0;
+    std::uint64_t availableMemory = 0;
+    std::size_t resolvedMemoryLimit = 0;
+    int memoryPressureLevel = 0;
+    int flushPendingCount = 0;
+    std::int64_t totalMemtableBytes = 0;
+    int totalImmutableCount = 0;
+    int totalSstableCount = 0;
+    std::uint64_t totalDataSizeBytes = 0;
+    int numOpenSstables = 0;
+    std::uint64_t globalSeq = 0;
+    std::int64_t txnMemoryBytes = 0;
+    std::size_t compactionQueueSize = 0;
+    std::size_t flushQueueSize = 0;
+};
+
+/**
  * @brief Block cache statistics
  */
 struct CacheStats
@@ -305,6 +327,14 @@ class ColumnFamily
      * on-disk state is required.
      */
     void purge();
+
+    /**
+     * @brief Force an immediate fsync of the active write-ahead log
+     *
+     * Useful for explicit durability control when using SyncMode::None or
+     * SyncMode::Interval. Thread-safe.
+     */
+    void syncWal();
 
     /**
      * @brief Check if a flush operation is in progress
@@ -595,6 +625,12 @@ class TidesDB
      * @return Transaction handle
      */
     [[nodiscard]] Transaction beginTransaction(IsolationLevel isolation);
+
+    /**
+     * @brief Get database-level statistics
+     * @return Aggregate statistics across the entire database instance
+     */
+    [[nodiscard]] DbStats getDbStats();
 
     /**
      * @brief Get block cache statistics

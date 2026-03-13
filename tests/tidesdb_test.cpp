@@ -1188,6 +1188,100 @@ TEST_F(TidesDBTest, TransactionResetAfterRollback)
     }
 }
 
+TEST_F(TidesDBTest, SyncWal)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.syncMode = tidesdb::SyncMode::None;
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Write some data
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 10; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+
+    // Force WAL sync -- should not throw
+    ASSERT_NO_THROW(cf.syncWal());
+}
+
+TEST_F(TidesDBTest, SyncWalWithIntervalMode)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.syncMode = tidesdb::SyncMode::Interval;
+    cfConfig.syncIntervalUs = 1000000;  // 1 second
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Write data
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.commit();
+    }
+
+    // Explicit sync before the interval fires
+    ASSERT_NO_THROW(cf.syncWal());
+}
+
+TEST_F(TidesDBTest, GetDbStats)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("cf1", cfConfig);
+    db.createColumnFamily("cf2", cfConfig);
+
+    auto cf1 = db.getColumnFamily("cf1");
+    auto cf2 = db.getColumnFamily("cf2");
+
+    // Write some data
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 20; ++i)
+        {
+            txn.put(cf1, "k1_" + std::to_string(i), "v1_" + std::to_string(i), -1);
+            txn.put(cf2, "k2_" + std::to_string(i), "v2_" + std::to_string(i), -1);
+        }
+        txn.commit();
+    }
+
+    auto dbStats = db.getDbStats();
+
+    ASSERT_EQ(dbStats.numColumnFamilies, 2);
+    ASSERT_GT(dbStats.totalMemory, 0u);
+    ASSERT_GE(dbStats.resolvedMemoryLimit, 0u);
+    ASSERT_GE(dbStats.memoryPressureLevel, 0);
+    ASSERT_GE(dbStats.globalSeq, 0u);
+    ASSERT_GE(dbStats.flushQueueSize, 0u);
+    ASSERT_GE(dbStats.compactionQueueSize, 0u);
+}
+
+TEST_F(TidesDBTest, GetDbStatsEmpty)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("empty_cf", cfConfig);
+
+    auto dbStats = db.getDbStats();
+
+    ASSERT_EQ(dbStats.numColumnFamilies, 1);
+    ASSERT_GT(dbStats.totalMemory, 0u);
+}
+
 // Commit hook test helpers
 struct HookTestCtx
 {
