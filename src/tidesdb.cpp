@@ -271,6 +271,12 @@ void ColumnFamily::purge()
     checkResult(result, "failed to purge column family");
 }
 
+void ColumnFamily::syncWal()
+{
+    int result = tidesdb_sync_wal(cf_);
+    checkResult(result, "failed to sync WAL");
+}
+
 bool ColumnFamily::isFlushing() const
 {
     return tidesdb_is_flushing(cf_) != 0;
@@ -736,6 +742,32 @@ Transaction TidesDB::beginTransaction(IsolationLevel isolation)
         db_, static_cast<tidesdb_isolation_level_t>(isolation), &txn);
     checkResult(result, "failed to begin transaction with isolation");
     return Transaction(txn);
+}
+
+DbStats TidesDB::getDbStats()
+{
+    tidesdb_db_stats_t cStats;
+    int result = tidesdb_get_db_stats(db_, &cStats);
+    checkResult(result, "failed to get database stats");
+
+    DbStats stats;
+    stats.numColumnFamilies = cStats.num_column_families;
+    stats.totalMemory = cStats.total_memory;
+    stats.availableMemory = cStats.available_memory;
+    stats.resolvedMemoryLimit = cStats.resolved_memory_limit;
+    stats.memoryPressureLevel = cStats.memory_pressure_level;
+    stats.flushPendingCount = cStats.flush_pending_count;
+    stats.totalMemtableBytes = cStats.total_memtable_bytes;
+    stats.totalImmutableCount = cStats.total_immutable_count;
+    stats.totalSstableCount = cStats.total_sstable_count;
+    stats.totalDataSizeBytes = cStats.total_data_size_bytes;
+    stats.numOpenSstables = cStats.num_open_sstables;
+    stats.globalSeq = cStats.global_seq;
+    stats.txnMemoryBytes = cStats.txn_memory_bytes;
+    stats.compactionQueueSize = cStats.compaction_queue_size;
+    stats.flushQueueSize = cStats.flush_queue_size;
+
+    return stats;
 }
 
 CacheStats TidesDB::getCacheStats()
