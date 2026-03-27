@@ -650,8 +650,35 @@ TidesDB::TidesDB(const Config& config)
     cConfig.unified_memtable_skip_list_probability = config.unifiedMemtableSkipListProbability;
     cConfig.unified_memtable_sync_mode = static_cast<int>(config.unifiedMemtableSyncMode);
     cConfig.unified_memtable_sync_interval_us = config.unifiedMemtableSyncIntervalUs;
-    cConfig.object_store = nullptr;
-    cConfig.object_store_config = nullptr;
+    cConfig.object_store = config.objectStore;
+
+    tidesdb_objstore_config_t osCfg;
+    if (config.objectStoreConfig.has_value())
+    {
+        const auto& os = config.objectStoreConfig.value();
+        osCfg.local_cache_path =
+            os.localCachePath.empty() ? nullptr : os.localCachePath.c_str();
+        osCfg.local_cache_max_bytes = os.localCacheMaxBytes;
+        osCfg.cache_on_read = os.cacheOnRead ? 1 : 0;
+        osCfg.cache_on_write = os.cacheOnWrite ? 1 : 0;
+        osCfg.max_concurrent_uploads = os.maxConcurrentUploads;
+        osCfg.max_concurrent_downloads = os.maxConcurrentDownloads;
+        osCfg.multipart_threshold = os.multipartThreshold;
+        osCfg.multipart_part_size = os.multipartPartSize;
+        osCfg.sync_manifest_to_object = os.syncManifestToObject ? 1 : 0;
+        osCfg.replicate_wal = os.replicateWal ? 1 : 0;
+        osCfg.wal_upload_sync = os.walUploadSync ? 1 : 0;
+        osCfg.wal_sync_threshold_bytes = os.walSyncThresholdBytes;
+        osCfg.wal_sync_on_commit = os.walSyncOnCommit ? 1 : 0;
+        osCfg.replica_mode = os.replicaMode ? 1 : 0;
+        osCfg.replica_sync_interval_us = os.replicaSyncIntervalUs;
+        osCfg.replica_replay_wal = os.replicaReplayWal ? 1 : 0;
+        cConfig.object_store_config = &osCfg;
+    }
+    else
+    {
+        cConfig.object_store_config = nullptr;
+    }
 
     int result = tidesdb_open(&cConfig, &db_);
     checkResult(result, "failed to open database");
@@ -901,6 +928,31 @@ void TidesDB::promoteToPrimary()
     checkResult(result, "failed to promote to primary");
 }
 
+ObjectStoreConfig ObjectStoreConfig::defaultConfig()
+{
+    tidesdb_objstore_config_t cCfg = tidesdb_objstore_default_config();
+
+    ObjectStoreConfig cfg;
+    cfg.localCachePath = cCfg.local_cache_path ? cCfg.local_cache_path : "";
+    cfg.localCacheMaxBytes = cCfg.local_cache_max_bytes;
+    cfg.cacheOnRead = cCfg.cache_on_read != 0;
+    cfg.cacheOnWrite = cCfg.cache_on_write != 0;
+    cfg.maxConcurrentUploads = cCfg.max_concurrent_uploads;
+    cfg.maxConcurrentDownloads = cCfg.max_concurrent_downloads;
+    cfg.multipartThreshold = cCfg.multipart_threshold;
+    cfg.multipartPartSize = cCfg.multipart_part_size;
+    cfg.syncManifestToObject = cCfg.sync_manifest_to_object != 0;
+    cfg.replicateWal = cCfg.replicate_wal != 0;
+    cfg.walUploadSync = cCfg.wal_upload_sync != 0;
+    cfg.walSyncThresholdBytes = cCfg.wal_sync_threshold_bytes;
+    cfg.walSyncOnCommit = cCfg.wal_sync_on_commit != 0;
+    cfg.replicaMode = cCfg.replica_mode != 0;
+    cfg.replicaSyncIntervalUs = cCfg.replica_sync_interval_us;
+    cfg.replicaReplayWal = cCfg.replica_replay_wal != 0;
+
+    return cfg;
+}
+
 Config TidesDB::defaultConfig()
 {
     tidesdb_config_t cConfig = tidesdb_default_config();
@@ -921,6 +973,8 @@ Config TidesDB::defaultConfig()
     config.unifiedMemtableSkipListProbability = cConfig.unified_memtable_skip_list_probability;
     config.unifiedMemtableSyncMode = static_cast<SyncMode>(cConfig.unified_memtable_sync_mode);
     config.unifiedMemtableSyncIntervalUs = cConfig.unified_memtable_sync_interval_us;
+    config.objectStore = nullptr;
+    config.objectStoreConfig = std::nullopt;
 
     return config;
 }
