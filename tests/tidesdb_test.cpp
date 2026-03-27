@@ -1478,6 +1478,164 @@ TEST_F(TidesDBTest, CommitHookViaConfig)
     ASSERT_GE(hookCtx.totalOps.load(), 1);
 }
 
+TEST_F(TidesDBTest, DeleteColumnFamily)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("to_delete_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("to_delete_cf");
+
+    // Write some data
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.commit();
+    }
+
+    // Delete by handle
+    db.deleteColumnFamily(cf);
+
+    // Should no longer exist
+    EXPECT_THROW(db.getColumnFamily("to_delete_cf"), tidesdb::Exception);
+}
+
+TEST_F(TidesDBTest, IteratorKeyValue)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key1", "value1", -1);
+        txn.put(cf, "key2", "value2", -1);
+        txn.put(cf, "key3", "value3", -1);
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        auto iter = txn.newIterator(cf);
+        iter.seekToFirst();
+
+        int count = 0;
+        while (iter.valid())
+        {
+            auto [key, value] = iter.keyValue();
+            std::string keyStr(key.begin(), key.end());
+            std::string valueStr(value.begin(), value.end());
+
+            ASSERT_FALSE(keyStr.empty());
+            ASSERT_FALSE(valueStr.empty());
+
+            count++;
+            iter.next();
+        }
+
+        ASSERT_EQ(count, 3);
+    }
+}
+
+TEST_F(TidesDBTest, UnifiedMemtableConfig)
+{
+    tidesdb::Config config;
+    config.dbPath = testDbPath_;
+    config.numFlushThreads = 2;
+    config.numCompactionThreads = 2;
+    config.logLevel = tidesdb::LogLevel::Info;
+    config.blockCacheSize = 64 * 1024 * 1024;
+    config.maxOpenSSTables = 256;
+    config.unifiedMemtable = true;
+    config.unifiedMemtableWriteBufferSize = 32 * 1024 * 1024;
+    config.unifiedMemtableSkipListMaxLevel = 16;
+    config.unifiedMemtableSkipListProbability = 0.25f;
+    config.unifiedMemtableSyncMode = tidesdb::SyncMode::None;
+    config.unifiedMemtableSyncIntervalUs = 0;
+
+    tidesdb::TidesDB db(config);
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    // Write and read data with unified memtable mode
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "ukey", "uvalue", -1);
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        auto value = txn.get(cf, "ukey");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "uvalue");
+    }
+}
+
+TEST_F(TidesDBTest, DbStatsUnifiedFields)
+{
+    tidesdb::Config config;
+    config.dbPath = testDbPath_;
+    config.numFlushThreads = 2;
+    config.numCompactionThreads = 2;
+    config.logLevel = tidesdb::LogLevel::Info;
+    config.blockCacheSize = 64 * 1024 * 1024;
+    config.maxOpenSSTables = 256;
+    config.unifiedMemtable = true;
+
+    tidesdb::TidesDB db(config);
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto dbStats = db.getDbStats();
+
+    ASSERT_TRUE(dbStats.unifiedMemtableEnabled);
+    ASSERT_FALSE(dbStats.objectStoreEnabled);
+    ASSERT_FALSE(dbStats.replicaMode);
+}
+
+TEST_F(TidesDBTest, ErrorCodeReadonly)
+{
+    // Verify the Readonly error code maps correctly
+    ASSERT_EQ(static_cast<int>(tidesdb::ErrorCode::Readonly), TDB_ERR_READONLY);
+    ASSERT_EQ(static_cast<int>(tidesdb::ErrorCode::Readonly), -13);
+
+    // Verify error message
+    std::string msg = tidesdb::Exception::errorMessage(TDB_ERR_READONLY);
+    ASSERT_EQ(msg, "database is read-only");
+}
+
+TEST_F(TidesDBTest, DefaultConfigUnifiedFields)
+{
+    auto defaultConfig = tidesdb::TidesDB::defaultConfig();
+
+    // Default should have unified memtable disabled
+    ASSERT_FALSE(defaultConfig.unifiedMemtable);
+    ASSERT_EQ(defaultConfig.unifiedMemtableWriteBufferSize, 0u);
+    ASSERT_EQ(defaultConfig.unifiedMemtableSkipListMaxLevel, 0);
+    ASSERT_EQ(defaultConfig.unifiedMemtableSkipListProbability, 0.0f);
+    ASSERT_EQ(defaultConfig.unifiedMemtableSyncMode, tidesdb::SyncMode::None);
+    ASSERT_EQ(defaultConfig.unifiedMemtableSyncIntervalUs, 0u);
+}
+
+TEST_F(TidesDBTest, ColumnFamilyConfigObjectStoreFields)
+{
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+
+    // Verify object store fields are populated from C defaults
+    ASSERT_GT(cfConfig.objectTargetFileSize, 0u);  // default 256MB
+    ASSERT_GE(cfConfig.objectLazyCompaction, 0);
+    ASSERT_GE(cfConfig.objectPrefetchCompaction, 0);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

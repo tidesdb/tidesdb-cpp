@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 extern "C"
@@ -102,7 +103,8 @@ enum class ErrorCode
     MemoryLimit = TDB_ERR_MEMORY_LIMIT,
     InvalidDB = TDB_ERR_INVALID_DB,
     Unknown = TDB_ERR_UNKNOWN,
-    Locked = TDB_ERR_LOCKED
+    Locked = TDB_ERR_LOCKED,
+    Readonly = TDB_ERR_READONLY
 };
 
 /**
@@ -149,6 +151,8 @@ class Exception : public std::runtime_error
                 return "invalid database handle";
             case TDB_ERR_LOCKED:
                 return "database is locked";
+            case TDB_ERR_READONLY:
+                return "database is read-only";
             default:
                 return "unknown error";
         }
@@ -190,8 +194,11 @@ struct ColumnFamilyConfig
     int l0QueueStallThreshold = 20;
     bool useBtree = false;  ///< Use B+tree format for klog (default: false = block-based)
     tidesdb_commit_hook_fn commitHookFn =
-        nullptr;                    ///< Optional commit hook callback (runtime-only)
-    void* commitHookCtx = nullptr;  ///< Optional user context for commit hook (runtime-only)
+        nullptr;                           ///< Optional commit hook callback (runtime-only)
+    void* commitHookCtx = nullptr;         ///< Optional user context for commit hook (runtime-only)
+    std::size_t objectTargetFileSize = 0;  ///< Target SSTable size in object store mode (0=auto)
+    int objectLazyCompaction = 0;          ///< 1 = compact less aggressively in object store mode
+    int objectPrefetchCompaction = 1;      ///< 1 = download all inputs before merge
 
     /**
      * @brief Get default column family configuration from TidesDB
@@ -231,6 +238,13 @@ struct Config
     bool logToFile = false;
     std::size_t logTruncationAt = 24 * 1024 * 1024;
     std::size_t maxMemoryUsage = 0;  ///< Global memory limit in bytes (0 = auto)
+    bool unifiedMemtable = false;    ///< Enable unified memtable mode (default: per-CF memtables)
+    std::size_t unifiedMemtableWriteBufferSize =
+        0;                                    ///< Unified memtable write buffer size (0 = auto)
+    int unifiedMemtableSkipListMaxLevel = 0;  ///< Skip list max level (0 = default 12)
+    float unifiedMemtableSkipListProbability = 0;  ///< Skip list probability (0 = default 0.25)
+    SyncMode unifiedMemtableSyncMode = SyncMode::None;  ///< Sync mode for unified WAL
+    std::uint64_t unifiedMemtableSyncIntervalUs = 0;    ///< Sync interval for unified WAL
 };
 
 /**
@@ -276,6 +290,22 @@ struct DbStats
     std::int64_t txnMemoryBytes = 0;
     std::size_t compactionQueueSize = 0;
     std::size_t flushQueueSize = 0;
+    bool unifiedMemtableEnabled = false;
+    std::int64_t unifiedMemtableBytes = 0;
+    int unifiedImmutableCount = 0;
+    bool unifiedIsFlushing = false;
+    std::uint32_t unifiedNextCfIndex = 0;
+    std::uint64_t unifiedWalGeneration = 0;
+    bool objectStoreEnabled = false;
+    std::string objectStoreConnector;
+    std::size_t localCacheBytesUsed = 0;
+    std::size_t localCacheBytesMax = 0;
+    int localCacheNumFiles = 0;
+    std::uint64_t lastUploadedGeneration = 0;
+    std::size_t uploadQueueDepth = 0;
+    std::uint64_t totalUploads = 0;
+    std::uint64_t totalUploadFailures = 0;
+    bool replicaMode = false;
 };
 
 /**
@@ -458,6 +488,12 @@ class Iterator
      */
     [[nodiscard]] std::vector<std::uint8_t> value() const;
 
+    /**
+     * @brief Get the current key and value in a single call
+     * @return Pair of key and value byte vectors
+     */
+    [[nodiscard]] std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>> keyValue() const;
+
    private:
     friend class Transaction;
     explicit Iterator(tidesdb_iter_t* iter) : iter_(iter)
@@ -595,10 +631,16 @@ class TidesDB
     void createColumnFamily(const std::string& name, const ColumnFamilyConfig& config);
 
     /**
-     * @brief Drop a column family
+     * @brief Drop a column family by name
      * @param name Column family name
      */
     void dropColumnFamily(const std::string& name);
+
+    /**
+     * @brief Delete a column family by handle (faster when you already hold a handle)
+     * @param cf Column family handle
+     */
+    void deleteColumnFamily(ColumnFamily& cf);
 
     /**
      * @brief Get a column family by name
@@ -690,6 +732,11 @@ class TidesDB
      * column family that fails.
      */
     void purge();
+
+    /**
+     * @brief Switch a read-only replica to primary mode
+     */
+    void promoteToPrimary();
 
     /**
      * @brief Get default database configuration

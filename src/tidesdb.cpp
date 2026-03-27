@@ -69,6 +69,9 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
     config.useBtree = cConfig.use_btree != 0;
+    config.objectTargetFileSize = cConfig.object_target_file_size;
+    config.objectLazyCompaction = cConfig.object_lazy_compaction;
+    config.objectPrefetchCompaction = cConfig.object_prefetch_compaction;
 
     return config;
 }
@@ -103,6 +106,9 @@ ColumnFamilyConfig ColumnFamilyConfig::loadFromIni(const std::string& iniFile,
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
     config.useBtree = cConfig.use_btree != 0;
+    config.objectTargetFileSize = cConfig.object_target_file_size;
+    config.objectLazyCompaction = cConfig.object_lazy_compaction;
+    config.objectPrefetchCompaction = cConfig.object_prefetch_compaction;
 
     return config;
 }
@@ -133,6 +139,9 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
     cConfig.use_btree = config.useBtree ? 1 : 0;
+    cConfig.object_target_file_size = config.objectTargetFileSize;
+    cConfig.object_lazy_compaction = config.objectLazyCompaction;
+    cConfig.object_prefetch_compaction = config.objectPrefetchCompaction;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
     if (!config.comparatorName.empty())
@@ -246,6 +255,9 @@ Stats ColumnFamily::getStats() const
         cfConfig.l1FileCountTrigger = cStats->config->l1_file_count_trigger;
         cfConfig.l0QueueStallThreshold = cStats->config->l0_queue_stall_threshold;
         cfConfig.useBtree = cStats->config->use_btree != 0;
+        cfConfig.objectTargetFileSize = cStats->config->object_target_file_size;
+        cfConfig.objectLazyCompaction = cStats->config->object_lazy_compaction;
+        cfConfig.objectPrefetchCompaction = cStats->config->object_prefetch_compaction;
         stats.config = cfConfig;
     }
 
@@ -343,6 +355,9 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
     cConfig.use_btree = config.useBtree ? 1 : 0;
+    cConfig.object_target_file_size = config.objectTargetFileSize;
+    cConfig.object_lazy_compaction = config.objectLazyCompaction;
+    cConfig.object_prefetch_compaction = config.objectPrefetchCompaction;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
     if (!config.comparatorName.empty())
@@ -464,6 +479,20 @@ std::vector<std::uint8_t> Iterator::value() const
 
     std::vector<std::uint8_t> valueVec(valueData, valueData + valueSize);
     return valueVec;
+}
+
+std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>> Iterator::keyValue() const
+{
+    uint8_t* keyData = nullptr;
+    size_t keySize = 0;
+    uint8_t* valueData = nullptr;
+    size_t valueSize = 0;
+
+    int result = tidesdb_iter_key_value(iter_, &keyData, &keySize, &valueData, &valueSize);
+    checkResult(result, "failed to get key-value");
+
+    return {std::vector<std::uint8_t>(keyData, keyData + keySize),
+            std::vector<std::uint8_t>(valueData, valueData + valueSize)};
 }
 
 //-----------------------------------------------------------------------------
@@ -615,6 +644,14 @@ TidesDB::TidesDB(const Config& config)
     cConfig.log_to_file = config.logToFile ? 1 : 0;
     cConfig.log_truncation_at = config.logTruncationAt;
     cConfig.max_memory_usage = config.maxMemoryUsage;
+    cConfig.unified_memtable = config.unifiedMemtable ? 1 : 0;
+    cConfig.unified_memtable_write_buffer_size = config.unifiedMemtableWriteBufferSize;
+    cConfig.unified_memtable_skip_list_max_level = config.unifiedMemtableSkipListMaxLevel;
+    cConfig.unified_memtable_skip_list_probability = config.unifiedMemtableSkipListProbability;
+    cConfig.unified_memtable_sync_mode = static_cast<int>(config.unifiedMemtableSyncMode);
+    cConfig.unified_memtable_sync_interval_us = config.unifiedMemtableSyncIntervalUs;
+    cConfig.object_store = nullptr;
+    cConfig.object_store_config = nullptr;
 
     int result = tidesdb_open(&cConfig, &db_);
     checkResult(result, "failed to open database");
@@ -673,6 +710,9 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
     cConfig.use_btree = config.useBtree ? 1 : 0;
+    cConfig.object_target_file_size = config.objectTargetFileSize;
+    cConfig.object_lazy_compaction = config.objectLazyCompaction;
+    cConfig.object_prefetch_compaction = config.objectPrefetchCompaction;
 
     std::memset(cConfig.comparator_name, 0, TDB_MAX_COMPARATOR_NAME);
     if (!config.comparatorName.empty())
@@ -694,6 +734,13 @@ void TidesDB::dropColumnFamily(const std::string& name)
 {
     int result = tidesdb_drop_column_family(db_, name.c_str());
     checkResult(result, "failed to drop column family");
+}
+
+void TidesDB::deleteColumnFamily(ColumnFamily& cf)
+{
+    int result = tidesdb_delete_column_family(db_, cf.handle());
+    checkResult(result, "failed to delete column family");
+    cf.cf_ = nullptr;
 }
 
 ColumnFamily TidesDB::getColumnFamily(const std::string& name)
@@ -766,6 +813,22 @@ DbStats TidesDB::getDbStats()
     stats.txnMemoryBytes = cStats.txn_memory_bytes;
     stats.compactionQueueSize = cStats.compaction_queue_size;
     stats.flushQueueSize = cStats.flush_queue_size;
+    stats.unifiedMemtableEnabled = cStats.unified_memtable_enabled != 0;
+    stats.unifiedMemtableBytes = cStats.unified_memtable_bytes;
+    stats.unifiedImmutableCount = cStats.unified_immutable_count;
+    stats.unifiedIsFlushing = cStats.unified_is_flushing != 0;
+    stats.unifiedNextCfIndex = cStats.unified_next_cf_index;
+    stats.unifiedWalGeneration = cStats.unified_wal_generation;
+    stats.objectStoreEnabled = cStats.object_store_enabled != 0;
+    stats.objectStoreConnector = cStats.object_store_connector ? cStats.object_store_connector : "";
+    stats.localCacheBytesUsed = cStats.local_cache_bytes_used;
+    stats.localCacheBytesMax = cStats.local_cache_bytes_max;
+    stats.localCacheNumFiles = cStats.local_cache_num_files;
+    stats.lastUploadedGeneration = cStats.last_uploaded_generation;
+    stats.uploadQueueDepth = cStats.upload_queue_depth;
+    stats.totalUploads = cStats.total_uploads;
+    stats.totalUploadFailures = cStats.total_upload_failures;
+    stats.replicaMode = cStats.replica_mode != 0;
 
     return stats;
 }
@@ -832,6 +895,12 @@ void TidesDB::purge()
     checkResult(result, "failed to purge database");
 }
 
+void TidesDB::promoteToPrimary()
+{
+    int result = tidesdb_promote_to_primary(db_);
+    checkResult(result, "failed to promote to primary");
+}
+
 Config TidesDB::defaultConfig()
 {
     tidesdb_config_t cConfig = tidesdb_default_config();
@@ -846,6 +915,12 @@ Config TidesDB::defaultConfig()
     config.logToFile = cConfig.log_to_file != 0;
     config.logTruncationAt = cConfig.log_truncation_at;
     config.maxMemoryUsage = cConfig.max_memory_usage;
+    config.unifiedMemtable = cConfig.unified_memtable != 0;
+    config.unifiedMemtableWriteBufferSize = cConfig.unified_memtable_write_buffer_size;
+    config.unifiedMemtableSkipListMaxLevel = cConfig.unified_memtable_skip_list_max_level;
+    config.unifiedMemtableSkipListProbability = cConfig.unified_memtable_skip_list_probability;
+    config.unifiedMemtableSyncMode = static_cast<SyncMode>(cConfig.unified_memtable_sync_mode);
+    config.unifiedMemtableSyncIntervalUs = cConfig.unified_memtable_sync_interval_us;
 
     return config;
 }
