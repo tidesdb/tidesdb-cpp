@@ -225,6 +225,34 @@ struct ColumnFamilyConfig
 };
 
 /**
+ * @brief Object store configuration for controlling cache, upload, and replication behavior
+ */
+struct ObjectStoreConfig
+{
+    std::string localCachePath;                    ///< Local directory for cached SSTable files (empty = use db_path)
+    std::size_t localCacheMaxBytes = 0;            ///< Max local cache size in bytes (0 = unlimited)
+    bool cacheOnRead = true;                       ///< Cache downloaded files locally
+    bool cacheOnWrite = true;                      ///< Keep local copy after upload
+    int maxConcurrentUploads = 4;                  ///< Parallel upload threads
+    int maxConcurrentDownloads = 8;                ///< Parallel download threads
+    std::size_t multipartThreshold = 64 * 1024 * 1024;  ///< Use multipart upload above this size (64MB)
+    std::size_t multipartPartSize = 8 * 1024 * 1024;    ///< Chunk size for multipart uploads (8MB)
+    bool syncManifestToObject = true;              ///< Upload MANIFEST after each compaction
+    bool replicateWal = true;                      ///< Upload closed WAL segments for replication
+    bool walUploadSync = false;                    ///< false = background WAL upload, true = block flush until uploaded
+    std::size_t walSyncThresholdBytes = 1048576;   ///< Sync active WAL when it grows by this many bytes (0 = off)
+    bool walSyncOnCommit = false;                  ///< Upload WAL after every txn commit for RPO=0
+    bool replicaMode = false;                      ///< Enable read-only replica mode
+    std::uint64_t replicaSyncIntervalUs = 5000000; ///< MANIFEST poll interval in microseconds (5s)
+    bool replicaReplayWal = true;                  ///< Replay WAL from object store for near-real-time reads
+
+    /**
+     * @brief Get default object store configuration from TidesDB
+     */
+    static ObjectStoreConfig defaultConfig();
+};
+
+/**
  * @brief Database configuration
  */
 struct Config
@@ -245,6 +273,8 @@ struct Config
     float unifiedMemtableSkipListProbability = 0;  ///< Skip list probability (0 = default 0.25)
     SyncMode unifiedMemtableSyncMode = SyncMode::None;  ///< Sync mode for unified WAL
     std::uint64_t unifiedMemtableSyncIntervalUs = 0;    ///< Sync interval for unified WAL
+    tidesdb_objstore_t* objectStore = nullptr;   ///< Pluggable object store connector (nullptr = local only)
+    std::optional<ObjectStoreConfig> objectStoreConfig;  ///< Object store behavior config (nullopt = defaults)
 };
 
 /**
