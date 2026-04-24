@@ -69,7 +69,6 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
     config.useBtree = cConfig.use_btree != 0;
-    config.objectTargetFileSize = cConfig.object_target_file_size;
     config.objectLazyCompaction = cConfig.object_lazy_compaction;
     config.objectPrefetchCompaction = cConfig.object_prefetch_compaction;
 
@@ -106,7 +105,6 @@ ColumnFamilyConfig ColumnFamilyConfig::loadFromIni(const std::string& iniFile,
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
     config.useBtree = cConfig.use_btree != 0;
-    config.objectTargetFileSize = cConfig.object_target_file_size;
     config.objectLazyCompaction = cConfig.object_lazy_compaction;
     config.objectPrefetchCompaction = cConfig.object_prefetch_compaction;
 
@@ -139,7 +137,7 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
     cConfig.use_btree = config.useBtree ? 1 : 0;
-    cConfig.object_target_file_size = config.objectTargetFileSize;
+    cConfig.object_target_file_size = 0; /* retired, reserved in C for ABI compatibility */
     cConfig.object_lazy_compaction = config.objectLazyCompaction;
     cConfig.object_prefetch_compaction = config.objectPrefetchCompaction;
 
@@ -255,7 +253,6 @@ Stats ColumnFamily::getStats() const
         cfConfig.l1FileCountTrigger = cStats->config->l1_file_count_trigger;
         cfConfig.l0QueueStallThreshold = cStats->config->l0_queue_stall_threshold;
         cfConfig.useBtree = cStats->config->use_btree != 0;
-        cfConfig.objectTargetFileSize = cStats->config->object_target_file_size;
         cfConfig.objectLazyCompaction = cStats->config->object_lazy_compaction;
         cfConfig.objectPrefetchCompaction = cStats->config->object_prefetch_compaction;
         stats.config = cfConfig;
@@ -355,7 +352,7 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
     cConfig.use_btree = config.useBtree ? 1 : 0;
-    cConfig.object_target_file_size = config.objectTargetFileSize;
+    cConfig.object_target_file_size = 0; /* retired, reserved in C for ABI compatibility */
     cConfig.object_lazy_compaction = config.objectLazyCompaction;
     cConfig.object_prefetch_compaction = config.objectPrefetchCompaction;
 
@@ -584,6 +581,19 @@ void Transaction::del(ColumnFamily& cf, const std::vector<std::uint8_t>& key)
     checkResult(result, "failed to delete key");
 }
 
+void Transaction::singleDelete(ColumnFamily& cf, std::string_view key)
+{
+    int result = tidesdb_txn_single_delete(
+        txn_, cf.handle(), reinterpret_cast<const uint8_t*>(key.data()), key.size());
+    checkResult(result, "failed to single-delete key");
+}
+
+void Transaction::singleDelete(ColumnFamily& cf, const std::vector<std::uint8_t>& key)
+{
+    int result = tidesdb_txn_single_delete(txn_, cf.handle(), key.data(), key.size());
+    checkResult(result, "failed to single-delete key");
+}
+
 void Transaction::commit()
 {
     int result = tidesdb_txn_commit(txn_);
@@ -656,8 +666,7 @@ TidesDB::TidesDB(const Config& config)
     if (config.objectStoreConfig.has_value())
     {
         const auto& os = config.objectStoreConfig.value();
-        osCfg.local_cache_path =
-            os.localCachePath.empty() ? nullptr : os.localCachePath.c_str();
+        osCfg.local_cache_path = os.localCachePath.empty() ? nullptr : os.localCachePath.c_str();
         osCfg.local_cache_max_bytes = os.localCacheMaxBytes;
         osCfg.cache_on_read = os.cacheOnRead ? 1 : 0;
         osCfg.cache_on_write = os.cacheOnWrite ? 1 : 0;
@@ -737,7 +746,7 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
     cConfig.use_btree = config.useBtree ? 1 : 0;
-    cConfig.object_target_file_size = config.objectTargetFileSize;
+    cConfig.object_target_file_size = 0; /* retired, reserved in C for ABI compatibility */
     cConfig.object_lazy_compaction = config.objectLazyCompaction;
     cConfig.object_prefetch_compaction = config.objectPrefetchCompaction;
 
