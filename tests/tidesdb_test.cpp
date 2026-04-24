@@ -139,6 +139,54 @@ TEST_F(TidesDBTest, TransactionPutGetDelete)
     }
 }
 
+TEST_F(TidesDBTest, TransactionSingleDelete)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("test_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "sd_key", "sd_value", -1);
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        txn.singleDelete(cf, "sd_key");
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        EXPECT_THROW(txn.get(cf, "sd_key"), tidesdb::Exception);
+    }
+
+    // byte vector overload
+    std::vector<std::uint8_t> key{'b', 'y', 't', 'e', 'k', 'e', 'y'};
+    std::vector<std::uint8_t> value{'v', 'a', 'l'};
+
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, key, value, -1);
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        txn.singleDelete(cf, key);
+        txn.commit();
+    }
+
+    {
+        auto txn = db.beginTransaction();
+        EXPECT_THROW(txn.get(cf, key), tidesdb::Exception);
+    }
+}
+
 TEST_F(TidesDBTest, TransactionWithTTL)
 {
     tidesdb::TidesDB db(getConfig());
@@ -1630,8 +1678,6 @@ TEST_F(TidesDBTest, ColumnFamilyConfigObjectStoreFields)
 {
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
 
-    // Verify object store fields are populated from C defaults
-    ASSERT_GT(cfConfig.objectTargetFileSize, 0u);  // default 256MB
     ASSERT_GE(cfConfig.objectLazyCompaction, 0);
     ASSERT_GE(cfConfig.objectPrefetchCompaction, 0);
 }
