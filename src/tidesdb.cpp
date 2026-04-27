@@ -68,6 +68,8 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.minDiskSpace = cConfig.min_disk_space;
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
+    config.tombstoneDensityTrigger = cConfig.tombstone_density_trigger;
+    config.tombstoneDensityMinEntries = cConfig.tombstone_density_min_entries;
     config.useBtree = cConfig.use_btree != 0;
     config.objectLazyCompaction = cConfig.object_lazy_compaction;
     config.objectPrefetchCompaction = cConfig.object_prefetch_compaction;
@@ -104,6 +106,8 @@ ColumnFamilyConfig ColumnFamilyConfig::loadFromIni(const std::string& iniFile,
     config.minDiskSpace = cConfig.min_disk_space;
     config.l1FileCountTrigger = cConfig.l1_file_count_trigger;
     config.l0QueueStallThreshold = cConfig.l0_queue_stall_threshold;
+    config.tombstoneDensityTrigger = cConfig.tombstone_density_trigger;
+    config.tombstoneDensityMinEntries = cConfig.tombstone_density_min_entries;
     config.useBtree = cConfig.use_btree != 0;
     config.objectLazyCompaction = cConfig.object_lazy_compaction;
     config.objectPrefetchCompaction = cConfig.object_prefetch_compaction;
@@ -136,6 +140,8 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+    cConfig.tombstone_density_trigger = config.tombstoneDensityTrigger;
+    cConfig.tombstone_density_min_entries = config.tombstoneDensityMinEntries;
     cConfig.use_btree = config.useBtree ? 1 : 0;
     cConfig.object_target_file_size = 0; /* retired, reserved in C for ABI compatibility */
     cConfig.object_lazy_compaction = config.objectLazyCompaction;
@@ -227,6 +233,21 @@ Stats ColumnFamily::getStats() const
         }
     }
 
+    // Tombstone observability stats
+    stats.totalTombstones = cStats->total_tombstones;
+    stats.tombstoneRatio = cStats->tombstone_ratio;
+    stats.maxSstDensity = cStats->max_sst_density;
+    stats.maxSstDensityLevel = cStats->max_sst_density_level;
+
+    if (cStats->num_levels > 0 && cStats->level_tombstone_counts != nullptr)
+    {
+        stats.levelTombstoneCounts.resize(cStats->num_levels);
+        for (int i = 0; i < cStats->num_levels; ++i)
+        {
+            stats.levelTombstoneCounts[i] = cStats->level_tombstone_counts[i];
+        }
+    }
+
     if (cStats->config != nullptr)
     {
         ColumnFamilyConfig cfConfig;
@@ -252,6 +273,8 @@ Stats ColumnFamily::getStats() const
         cfConfig.minDiskSpace = cStats->config->min_disk_space;
         cfConfig.l1FileCountTrigger = cStats->config->l1_file_count_trigger;
         cfConfig.l0QueueStallThreshold = cStats->config->l0_queue_stall_threshold;
+        cfConfig.tombstoneDensityTrigger = cStats->config->tombstone_density_trigger;
+        cfConfig.tombstoneDensityMinEntries = cStats->config->tombstone_density_min_entries;
         cfConfig.useBtree = cStats->config->use_btree != 0;
         cfConfig.objectLazyCompaction = cStats->config->object_lazy_compaction;
         cfConfig.objectPrefetchCompaction = cStats->config->object_prefetch_compaction;
@@ -266,6 +289,52 @@ void ColumnFamily::compact()
 {
     int result = tidesdb_compact(cf_);
     checkResult(result, "failed to compact column family");
+}
+
+void ColumnFamily::compactRange(const std::optional<std::vector<std::uint8_t>>& startKey,
+                                const std::optional<std::vector<std::uint8_t>>& endKey)
+{
+    const uint8_t* startPtr = nullptr;
+    size_t startSize = 0;
+    if (startKey.has_value())
+    {
+        startSize = startKey->size();
+        startPtr = startSize > 0 ? startKey->data() : nullptr;
+    }
+
+    const uint8_t* endPtr = nullptr;
+    size_t endSize = 0;
+    if (endKey.has_value())
+    {
+        endSize = endKey->size();
+        endPtr = endSize > 0 ? endKey->data() : nullptr;
+    }
+
+    int result = tidesdb_compact_range(cf_, startPtr, startSize, endPtr, endSize);
+    checkResult(result, "failed to compact range");
+}
+
+void ColumnFamily::compactRange(const std::optional<std::string_view>& startKey,
+                                const std::optional<std::string_view>& endKey)
+{
+    const uint8_t* startPtr = nullptr;
+    size_t startSize = 0;
+    if (startKey.has_value())
+    {
+        startSize = startKey->size();
+        startPtr = startSize > 0 ? reinterpret_cast<const uint8_t*>(startKey->data()) : nullptr;
+    }
+
+    const uint8_t* endPtr = nullptr;
+    size_t endSize = 0;
+    if (endKey.has_value())
+    {
+        endSize = endKey->size();
+        endPtr = endSize > 0 ? reinterpret_cast<const uint8_t*>(endKey->data()) : nullptr;
+    }
+
+    int result = tidesdb_compact_range(cf_, startPtr, startSize, endPtr, endSize);
+    checkResult(result, "failed to compact range");
 }
 
 void ColumnFamily::flushMemtable()
@@ -351,6 +420,8 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+    cConfig.tombstone_density_trigger = config.tombstoneDensityTrigger;
+    cConfig.tombstone_density_min_entries = config.tombstoneDensityMinEntries;
     cConfig.use_btree = config.useBtree ? 1 : 0;
     cConfig.object_target_file_size = 0; /* retired, reserved in C for ABI compatibility */
     cConfig.object_lazy_compaction = config.objectLazyCompaction;
@@ -660,6 +731,7 @@ TidesDB::TidesDB(const Config& config)
     cConfig.unified_memtable_skip_list_probability = config.unifiedMemtableSkipListProbability;
     cConfig.unified_memtable_sync_mode = static_cast<int>(config.unifiedMemtableSyncMode);
     cConfig.unified_memtable_sync_interval_us = config.unifiedMemtableSyncIntervalUs;
+    cConfig.max_concurrent_flushes = config.maxConcurrentFlushes;
     cConfig.object_store = config.objectStore;
 
     tidesdb_objstore_config_t osCfg;
@@ -745,6 +817,8 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
     cConfig.min_disk_space = config.minDiskSpace;
     cConfig.l1_file_count_trigger = config.l1FileCountTrigger;
     cConfig.l0_queue_stall_threshold = config.l0QueueStallThreshold;
+    cConfig.tombstone_density_trigger = config.tombstoneDensityTrigger;
+    cConfig.tombstone_density_min_entries = config.tombstoneDensityMinEntries;
     cConfig.use_btree = config.useBtree ? 1 : 0;
     cConfig.object_target_file_size = 0; /* retired, reserved in C for ABI compatibility */
     cConfig.object_lazy_compaction = config.objectLazyCompaction;
@@ -982,6 +1056,7 @@ Config TidesDB::defaultConfig()
     config.unifiedMemtableSkipListProbability = cConfig.unified_memtable_skip_list_probability;
     config.unifiedMemtableSyncMode = static_cast<SyncMode>(cConfig.unified_memtable_sync_mode);
     config.unifiedMemtableSyncIntervalUs = cConfig.unified_memtable_sync_interval_us;
+    config.maxConcurrentFlushes = cConfig.max_concurrent_flushes;
     config.objectStore = nullptr;
     config.objectStoreConfig = std::nullopt;
 

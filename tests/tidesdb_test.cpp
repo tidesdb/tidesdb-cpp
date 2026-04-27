@@ -1682,6 +1682,196 @@ TEST_F(TidesDBTest, ColumnFamilyConfigObjectStoreFields)
     ASSERT_GE(cfConfig.objectPrefetchCompaction, 0);
 }
 
+TEST_F(TidesDBTest, TombstoneCfConfigRoundTrip)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto defaults = tidesdb::ColumnFamilyConfig::defaultConfig();
+    ASSERT_GT(defaults.tombstoneDensityMinEntries, 0u)
+        << "default tombstone_density_min_entries should be sourced from C library";
+
+    auto cfConfig = defaults;
+    cfConfig.tombstoneDensityTrigger = 0.5;
+    cfConfig.tombstoneDensityMinEntries = 256;
+
+    db.createColumnFamily("ts_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("ts_cf");
+    auto stats = cf.getStats();
+
+    ASSERT_TRUE(stats.config.has_value());
+    ASSERT_DOUBLE_EQ(stats.config->tombstoneDensityTrigger, 0.5);
+    ASSERT_EQ(stats.config->tombstoneDensityMinEntries, 256u);
+}
+
+TEST_F(TidesDBTest, TombstoneStatsAfterDeletes)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;  // small buffer to make flushes cheap
+    db.createColumnFamily("ts_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("ts_cf");
+
+    constexpr int kNumKeys = 200;
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < kNumKeys; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            std::string value = "value" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+    cf.flushMemtable();
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < kNumKeys / 2; ++i)
+        {
+            std::string key = "key" + std::to_string(i);
+            txn.del(cf, key);
+        }
+        txn.commit();
+    }
+    cf.flushMemtable();
+
+    // Brief wait for the flush to land
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    auto stats = cf.getStats();
+
+    ASSERT_GT(stats.totalTombstones, 0u);
+    ASSERT_GE(stats.tombstoneRatio, 0.0);
+    ASSERT_LE(stats.tombstoneRatio, 1.0);
+    ASSERT_GE(stats.maxSstDensity, 0.0);
+    ASSERT_LE(stats.maxSstDensity, 1.0);
+    ASSERT_EQ(stats.levelTombstoneCounts.size(), static_cast<std::size_t>(stats.numLevels));
+    if (stats.maxSstDensityLevel != 0)
+    {
+        ASSERT_GE(stats.maxSstDensityLevel, 1);
+        ASSERT_LE(stats.maxSstDensityLevel, stats.numLevels);
+    }
+}
+
+TEST_F(TidesDBTest, CompactRange)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;  // force multiple SSTables
+    db.createColumnFamily("cr_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("cr_cf");
+
+    // Several batches of writes + flushes to spread across SSTables/levels
+    for (int batch = 0; batch < 4; ++batch)
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 100; ++i)
+        {
+            std::string key = "k" + std::to_string(batch) + "_" + std::to_string(i);
+            std::string value = "v" + std::to_string(batch) + "_" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+        cf.flushMemtable();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    // Narrow range compaction should succeed
+    std::vector<std::uint8_t> startKey{'k', '1', '_', '0'};
+    std::vector<std::uint8_t> endKey{'k', '2', '_', '0'};
+    ASSERT_NO_THROW(cf.compactRange(startKey, endKey));
+
+    // Both endpoints unbounded must be rejected
+    try
+    {
+        cf.compactRange(std::optional<std::vector<std::uint8_t>>{},
+                        std::optional<std::vector<std::uint8_t>>{});
+        FAIL() << "expected InvalidArgs exception for both-null range";
+    }
+    catch (const tidesdb::Exception& e)
+    {
+        ASSERT_EQ(e.code(), tidesdb::ErrorCode::InvalidArgs);
+    }
+
+    // Keys outside the compacted range must still read back unchanged
+    {
+        auto txn = db.beginTransaction();
+        auto value = txn.get(cf, "k0_0");
+        std::string valueStr(value.begin(), value.end());
+        ASSERT_EQ(valueStr, "v0_0");
+
+        auto value3 = txn.get(cf, "k3_50");
+        std::string value3Str(value3.begin(), value3.end());
+        ASSERT_EQ(value3Str, "v3_50");
+    }
+}
+
+TEST_F(TidesDBTest, CompactRangeStringViewOverload)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;
+    db.createColumnFamily("cr_sv_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("cr_sv_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 50; ++i)
+        {
+            std::string key = "k_" + std::to_string(i);
+            std::string value = "v_" + std::to_string(i);
+            txn.put(cf, key, value, -1);
+        }
+        txn.commit();
+    }
+    cf.flushMemtable();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    using OptSV = std::optional<std::string_view>;
+    ASSERT_NO_THROW(
+        cf.compactRange(OptSV{std::string_view{"k_1"}}, OptSV{std::string_view{"k_3"}}));
+
+    // Unbounded start (nullopt), bounded end -- should succeed
+    ASSERT_NO_THROW(cf.compactRange(OptSV{}, OptSV{std::string_view{"k_5"}}));
+}
+
+TEST_F(TidesDBTest, MaxConcurrentFlushesConfig)
+{
+    tidesdb::Config config = getConfig();
+    config.maxConcurrentFlushes = 1;
+
+    tidesdb::TidesDB db(config);
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("mcf_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("mcf_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "key", "value", -1);
+        txn.commit();
+    }
+    ASSERT_NO_THROW(cf.flushMemtable());
+}
+
+TEST_F(TidesDBTest, MaxConcurrentFlushesDefault)
+{
+    auto defaultConfig = tidesdb::TidesDB::defaultConfig();
+
+    // Proves the value is sourced from tidesdb_default_config() rather than zero-initialized
+    ASSERT_GT(defaultConfig.maxConcurrentFlushes, 0)
+        << "default max_concurrent_flushes should be sourced from C library defaults";
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

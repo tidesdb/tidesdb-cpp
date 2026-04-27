@@ -192,6 +192,10 @@ struct ColumnFamilyConfig
     std::uint64_t minDiskSpace = 100 * 1024 * 1024;
     int l1FileCountTrigger = 4;
     int l0QueueStallThreshold = 20;
+    double tombstoneDensityTrigger = 0.0;  ///< Per-SSTable tombstone density above which
+                                           ///< compaction priority escalates (0.0 = disabled)
+    std::uint64_t tombstoneDensityMinEntries =
+        1024;               ///< SSTables with fewer entries are ignored by the density trigger
     bool useBtree = false;  ///< Use B+tree format for klog (default: false = block-based)
     tidesdb_commit_hook_fn commitHookFn =
         nullptr;                       ///< Optional commit hook callback (runtime-only)
@@ -275,6 +279,8 @@ struct Config
     float unifiedMemtableSkipListProbability = 0;  ///< Skip list probability (0 = default 0.25)
     SyncMode unifiedMemtableSyncMode = SyncMode::None;  ///< Sync mode for unified WAL
     std::uint64_t unifiedMemtableSyncIntervalUs = 0;    ///< Sync interval for unified WAL
+    int maxConcurrentFlushes =
+        0;  ///< Global cap on in-flight memtable flushes across all CFs (0 = library default)
     tidesdb_objstore_t* objectStore =
         nullptr;  ///< Pluggable object store connector (nullptr = local only)
     std::optional<ObjectStoreConfig>
@@ -302,6 +308,12 @@ struct Stats
     std::uint64_t btreeTotalNodes = 0;  ///< Total B+tree nodes across all SSTables
     std::uint32_t btreeMaxHeight = 0;   ///< Maximum tree height across all SSTables
     double btreeAvgHeight = 0.0;        ///< Average tree height across all SSTables
+    std::uint64_t totalTombstones = 0;  ///< Sum of tombstone counts across all SSTables
+    double tombstoneRatio = 0.0;        ///< total_tombstones / total_keys (0.0 if total_keys == 0)
+    std::vector<std::uint64_t>
+        levelTombstoneCounts;    ///< Per-level tombstone counts (parallels levelKeyCounts)
+    double maxSstDensity = 0.0;  ///< Worst per-SSTable tombstone density observed (0.0 to 1.0)
+    int maxSstDensityLevel = 0;  ///< 1-based level where maxSstDensity was observed (0 if none)
 };
 
 /**
@@ -377,6 +389,29 @@ class ColumnFamily
      * @brief Manually trigger compaction
      */
     void compact();
+
+    /**
+     * @brief Synchronously compact only SSTables overlapping [startKey, endKey)
+     *
+     * Blocks the calling thread until the merge commits or fails. Pass an empty
+     * optional (std::nullopt) for either endpoint to leave that side unbounded.
+     * Both endpoints unbounded is rejected with ErrorCode::InvalidArgs - use
+     * compact() for a full column-family compaction.
+     *
+     * @param startKey Start of range (inclusive); std::nullopt = unbounded
+     * @param endKey   End of range (exclusive); std::nullopt = unbounded
+     */
+    void compactRange(const std::optional<std::vector<std::uint8_t>>& startKey,
+                      const std::optional<std::vector<std::uint8_t>>& endKey);
+
+    /**
+     * @brief compactRange overload taking string_view bounds
+     *
+     * Pass empty optional for an unbounded endpoint. Empty (but present)
+     * string_views are forwarded as zero-length keys, matching the C API.
+     */
+    void compactRange(const std::optional<std::string_view>& startKey,
+                      const std::optional<std::string_view>& endKey);
 
     /**
      * @brief Manually trigger memtable flush
