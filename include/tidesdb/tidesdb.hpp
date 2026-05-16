@@ -32,6 +32,16 @@
 extern "C"
 {
 #include <tidesdb/db.h>
+
+    /**
+     * Create an S3-compatible object store connector (AWS S3, MinIO, etc.).
+     * The underlying libtidesdb must have been built with TIDESDB_WITH_S3=ON;
+     * otherwise this symbol is unresolved at link time.
+     */
+    tidesdb_objstore_t* tidesdb_objstore_s3_create(const char* endpoint, const char* bucket,
+                                                   const char* prefix, const char* access_key,
+                                                   const char* secret_key, const char* region,
+                                                   int use_ssl, int use_path_style);
 }
 
 namespace tidesdb
@@ -192,16 +202,15 @@ struct ColumnFamilyConfig
     std::uint64_t minDiskSpace = 100 * 1024 * 1024;
     int l1FileCountTrigger = 4;
     int l0QueueStallThreshold = 20;
-    double tombstoneDensityTrigger = 0.0;  ///< Per-SSTable tombstone density above which
-                                           ///< compaction priority escalates (0.0 = disabled)
+    double tombstoneDensityTrigger = 0.0;  // Per-SSTable tombstone density above which
+                                           // compaction priority escalates (0.0 = disabled)
     std::uint64_t tombstoneDensityMinEntries =
-        1024;               ///< SSTables with fewer entries are ignored by the density trigger
-    bool useBtree = false;  ///< Use B+tree format for klog (default: false = block-based)
-    tidesdb_commit_hook_fn commitHookFn =
-        nullptr;                       ///< Optional commit hook callback (runtime-only)
-    void* commitHookCtx = nullptr;     ///< Optional user context for commit hook (runtime-only)
-    int objectLazyCompaction = 0;      ///< 1 = compact less aggressively in object store mode
-    int objectPrefetchCompaction = 1;  ///< 1 = download all inputs before merge
+        1024;               // SSTables with fewer entries are ignored by the density trigger
+    bool useBtree = false;  // Use B+tree format for klog (default: false = block-based)
+    tidesdb_commit_hook_fn commitHookFn = nullptr;  // Optional commit hook callback (runtime-only)
+    void* commitHookCtx = nullptr;     // Optional user context for commit hook (runtime-only)
+    int objectLazyCompaction = 0;      // 1 = compact less aggressively in object store mode
+    int objectPrefetchCompaction = 1;  // 1 = download all inputs before merge
 
     /**
      * @brief Get default column family configuration from TidesDB
@@ -232,25 +241,24 @@ struct ColumnFamilyConfig
  */
 struct ObjectStoreConfig
 {
-    std::string localCachePath;  ///< Local directory for cached SSTable files (empty = use db_path)
-    std::size_t localCacheMaxBytes = 0;  ///< Max local cache size in bytes (0 = unlimited)
-    bool cacheOnRead = true;             ///< Cache downloaded files locally
-    bool cacheOnWrite = true;            ///< Keep local copy after upload
-    int maxConcurrentUploads = 4;        ///< Parallel upload threads
-    int maxConcurrentDownloads = 8;      ///< Parallel download threads
+    std::string localCachePath;  // Local directory for cached SSTable files (empty = use db_path)
+    std::size_t localCacheMaxBytes = 0;  // Max local cache size in bytes (0 = unlimited)
+    bool cacheOnRead = true;             // Cache downloaded files locally
+    bool cacheOnWrite = true;            // Keep local copy after upload
+    int maxConcurrentUploads = 4;        // Parallel upload threads
+    int maxConcurrentDownloads = 8;      // Parallel download threads
     std::size_t multipartThreshold =
-        64 * 1024 * 1024;  ///< Use multipart upload above this size (64MB)
-    std::size_t multipartPartSize = 8 * 1024 * 1024;  ///< Chunk size for multipart uploads (8MB)
-    bool syncManifestToObject = true;                 ///< Upload MANIFEST after each compaction
-    bool replicateWal = true;  ///< Upload closed WAL segments for replication
-    bool walUploadSync =
-        false;  ///< false = background WAL upload, true = block flush until uploaded
+        64 * 1024 * 1024;                             // Use multipart upload above this size (64MB)
+    std::size_t multipartPartSize = 8 * 1024 * 1024;  // Chunk size for multipart uploads (8MB)
+    bool syncManifestToObject = true;                 // Upload MANIFEST after each compaction
+    bool replicateWal = true;                         // Upload closed WAL segments for replication
+    bool walUploadSync = false;  // false = background WAL upload, true = block flush until uploaded
     std::size_t walSyncThresholdBytes =
-        1048576;                   ///< Sync active WAL when it grows by this many bytes (0 = off)
-    bool walSyncOnCommit = false;  ///< Upload WAL after every txn commit for RPO=0
-    bool replicaMode = false;      ///< Enable read-only replica mode
-    std::uint64_t replicaSyncIntervalUs = 5000000;  ///< MANIFEST poll interval in microseconds (5s)
-    bool replicaReplayWal = true;  ///< Replay WAL from object store for near-real-time reads
+        1048576;                   // Sync active WAL when it grows by this many bytes (0 = off)
+    bool walSyncOnCommit = false;  // Upload WAL after every txn commit for RPO=0
+    bool replicaMode = false;      // Enable read-only replica mode
+    std::uint64_t replicaSyncIntervalUs = 5000000;  // MANIFEST poll interval in microseconds (5s)
+    bool replicaReplayWal = true;  // Replay WAL from object store for near-real-time reads
 
     /**
      * @brief Get default object store configuration from TidesDB
@@ -271,20 +279,20 @@ struct Config
     std::size_t maxOpenSSTables = 256;
     bool logToFile = false;
     std::size_t logTruncationAt = 24 * 1024 * 1024;
-    std::size_t maxMemoryUsage = 0;  ///< Global memory limit in bytes (0 = auto)
-    bool unifiedMemtable = false;    ///< Enable unified memtable mode (default: per-CF memtables)
+    std::size_t maxMemoryUsage = 0;  // Global memory limit in bytes (0 = auto)
+    bool unifiedMemtable = false;    // Enable unified memtable mode (default: per-CF memtables)
     std::size_t unifiedMemtableWriteBufferSize =
-        0;                                    ///< Unified memtable write buffer size (0 = auto)
-    int unifiedMemtableSkipListMaxLevel = 0;  ///< Skip list max level (0 = default 12)
-    float unifiedMemtableSkipListProbability = 0;  ///< Skip list probability (0 = default 0.25)
-    SyncMode unifiedMemtableSyncMode = SyncMode::None;  ///< Sync mode for unified WAL
-    std::uint64_t unifiedMemtableSyncIntervalUs = 0;    ///< Sync interval for unified WAL
+        0;                                         // Unified memtable write buffer size (0 = auto)
+    int unifiedMemtableSkipListMaxLevel = 0;       // Skip list max level (0 = default 12)
+    float unifiedMemtableSkipListProbability = 0;  // Skip list probability (0 = default 0.25)
+    SyncMode unifiedMemtableSyncMode = SyncMode::None;  // Sync mode for unified WAL
+    std::uint64_t unifiedMemtableSyncIntervalUs = 0;    // Sync interval for unified WAL
     int maxConcurrentFlushes =
-        0;  ///< Global cap on in-flight memtable flushes across all CFs (0 = library default)
+        0;  // Global cap on in-flight memtable flushes across all CFs (0 = library default)
     tidesdb_objstore_t* objectStore =
-        nullptr;  ///< Pluggable object store connector (nullptr = local only)
+        nullptr;  // Pluggable object store connector (nullptr = local only)
     std::optional<ObjectStoreConfig>
-        objectStoreConfig;  ///< Object store behavior config (nullopt = defaults)
+        objectStoreConfig;  // Object store behavior config (nullopt = defaults)
 };
 
 /**
@@ -304,16 +312,16 @@ struct Stats
     std::vector<std::uint64_t> levelKeyCounts;
     double readAmp = 0.0;
     double hitRate = 0.0;
-    bool useBtree = false;              ///< Whether column family uses B+tree format
-    std::uint64_t btreeTotalNodes = 0;  ///< Total B+tree nodes across all SSTables
-    std::uint32_t btreeMaxHeight = 0;   ///< Maximum tree height across all SSTables
-    double btreeAvgHeight = 0.0;        ///< Average tree height across all SSTables
-    std::uint64_t totalTombstones = 0;  ///< Sum of tombstone counts across all SSTables
-    double tombstoneRatio = 0.0;        ///< total_tombstones / total_keys (0.0 if total_keys == 0)
+    bool useBtree = false;              // Whether column family uses B+tree format
+    std::uint64_t btreeTotalNodes = 0;  // Total B+tree nodes across all SSTables
+    std::uint32_t btreeMaxHeight = 0;   // Maximum tree height across all SSTables
+    double btreeAvgHeight = 0.0;        // Average tree height across all SSTables
+    std::uint64_t totalTombstones = 0;  // Sum of tombstone counts across all SSTables
+    double tombstoneRatio = 0.0;        // total_tombstones / total_keys (0.0 if total_keys == 0)
     std::vector<std::uint64_t>
-        levelTombstoneCounts;    ///< Per-level tombstone counts (parallels levelKeyCounts)
-    double maxSstDensity = 0.0;  ///< Worst per-SSTable tombstone density observed (0.0 to 1.0)
-    int maxSstDensityLevel = 0;  ///< 1-based level where maxSstDensity was observed (0 if none)
+        levelTombstoneCounts;    // Per-level tombstone counts (parallels levelKeyCounts)
+    double maxSstDensity = 0.0;  // Worst per-SSTable tombstone density observed (0.0 to 1.0)
+    int maxSstDensityLevel = 0;  // 1-based level where maxSstDensity was observed (0 if none)
 };
 
 /**
