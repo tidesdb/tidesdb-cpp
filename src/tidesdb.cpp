@@ -38,10 +38,6 @@ void checkResult(int result, const std::string& context)
 
 }  // anonymous namespace
 
-//-----------------------------------------------------------------------------
-// ColumnFamilyConfig
-//-----------------------------------------------------------------------------
-
 ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
 {
     tidesdb_column_family_config_t cConfig = tidesdb_default_column_family_config();
@@ -163,10 +159,6 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
     checkResult(result, "failed to save config to INI");
 }
 
-//-----------------------------------------------------------------------------
-// ColumnFamily
-//-----------------------------------------------------------------------------
-
 ColumnFamily::ColumnFamily(ColumnFamily&& other) noexcept : cf_(other.cf_)
 {
     other.cf_ = nullptr;
@@ -233,7 +225,6 @@ Stats ColumnFamily::getStats() const
         }
     }
 
-    // Tombstone observability stats
     stats.totalTombstones = cStats->total_tombstones;
     stats.tombstoneRatio = cStats->tombstone_ratio;
     stats.maxSstDensity = cStats->max_sst_density;
@@ -443,10 +434,6 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
     checkResult(result, "failed to update runtime config");
 }
 
-//-----------------------------------------------------------------------------
-// Iterator
-//-----------------------------------------------------------------------------
-
 Iterator::Iterator(Iterator&& other) noexcept : iter_(other.iter_)
 {
     other.iter_ = nullptr;
@@ -508,7 +495,6 @@ bool Iterator::valid() const
 void Iterator::next()
 {
     int result = tidesdb_iter_next(iter_);
-    // TDB_ERR_NOT_FOUND is expected at end of iteration, not an error
     if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND)
     {
         checkResult(result, "failed to move to next");
@@ -518,7 +504,6 @@ void Iterator::next()
 void Iterator::prev()
 {
     int result = tidesdb_iter_prev(iter_);
-    // TDB_ERR_NOT_FOUND is expected at end of iteration, not an error
     if (result != TDB_SUCCESS && result != TDB_ERR_NOT_FOUND)
     {
         checkResult(result, "failed to move to prev");
@@ -562,10 +547,6 @@ std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>> Iterator::keyVal
     return {std::vector<std::uint8_t>(keyData, keyData + keySize),
             std::vector<std::uint8_t>(valueData, valueData + valueSize)};
 }
-
-//-----------------------------------------------------------------------------
-// Transaction
-//-----------------------------------------------------------------------------
 
 Transaction::Transaction(Transaction&& other) noexcept : txn_(other.txn_)
 {
@@ -708,10 +689,6 @@ void Transaction::reset(IsolationLevel isolation)
     int result = tidesdb_txn_reset(txn_, static_cast<tidesdb_isolation_level_t>(isolation));
     checkResult(result, "failed to reset transaction");
 }
-
-//-----------------------------------------------------------------------------
-// TidesDB
-//-----------------------------------------------------------------------------
 
 TidesDB::TidesDB(const Config& config)
 {
