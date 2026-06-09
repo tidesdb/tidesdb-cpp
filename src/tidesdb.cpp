@@ -38,6 +38,25 @@ void checkResult(int result, const std::string& context)
 
 }  // anonymous namespace
 
+bool init(tidesdb_malloc_fn mallocFn, tidesdb_calloc_fn callocFn, tidesdb_realloc_fn reallocFn,
+          tidesdb_free_fn freeFn)
+{
+    // tidesdb_init returns 0 on success and -1 if TidesDB was already initialized.
+    // The -1 is not an error condition (it just means the allocators are unchanged),
+    // so we report it as a bool rather than throwing.
+    return tidesdb_init(mallocFn, callocFn, reallocFn, freeFn) == 0;
+}
+
+void finalize()
+{
+    tidesdb_finalize();
+}
+
+long raiseOpenFileLimit(long desired)
+{
+    return tidesdb_raise_open_file_limit(desired);
+}
+
 ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
 {
     tidesdb_column_family_config_t cConfig = tidesdb_default_column_family_config();
@@ -58,6 +77,7 @@ ColumnFamilyConfig ColumnFamilyConfig::defaultConfig()
     config.syncMode = static_cast<SyncMode>(cConfig.sync_mode);
     config.syncIntervalUs = cConfig.sync_interval_us;
     config.comparatorName = cConfig.comparator_name;
+    config.comparatorCtxStr = cConfig.comparator_ctx_str;
     config.skipListMaxLevel = cConfig.skip_list_max_level;
     config.skipListProbability = cConfig.skip_list_probability;
     config.defaultIsolationLevel = static_cast<IsolationLevel>(cConfig.default_isolation_level);
@@ -96,6 +116,7 @@ ColumnFamilyConfig ColumnFamilyConfig::loadFromIni(const std::string& iniFile,
     config.syncMode = static_cast<SyncMode>(cConfig.sync_mode);
     config.syncIntervalUs = cConfig.sync_interval_us;
     config.comparatorName = cConfig.comparator_name;
+    config.comparatorCtxStr = cConfig.comparator_ctx_str;
     config.skipListMaxLevel = cConfig.skip_list_max_level;
     config.skipListProbability = cConfig.skip_list_probability;
     config.defaultIsolationLevel = static_cast<IsolationLevel>(cConfig.default_isolation_level);
@@ -150,6 +171,11 @@ void ColumnFamilyConfig::saveToIni(const std::string& iniFile, const std::string
                      TDB_MAX_COMPARATOR_NAME - 1);
     }
     std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
+    if (!config.comparatorCtxStr.empty())
+    {
+        std::strncpy(cConfig.comparator_ctx_str, config.comparatorCtxStr.c_str(),
+                     TDB_MAX_COMPARATOR_CTX - 1);
+    }
     cConfig.comparator_fn_cached = nullptr;
     cConfig.comparator_ctx_cached = nullptr;
     cConfig.commit_hook_fn = nullptr;
@@ -230,6 +256,14 @@ Stats ColumnFamily::getStats() const
     stats.maxSstDensity = cStats->max_sst_density;
     stats.maxSstDensityLevel = cStats->max_sst_density_level;
 
+    stats.walBytesWritten = cStats->wal_bytes_written;
+    stats.flushBytesWritten = cStats->flush_bytes_written;
+    stats.compactionBytesWritten = cStats->compaction_bytes_written;
+    stats.compactionBytesRead = cStats->compaction_bytes_read;
+    stats.userBytesWritten = cStats->user_bytes_written;
+    stats.flushCount = cStats->flush_count;
+    stats.compactionCount = cStats->compaction_count;
+
     if (cStats->num_levels > 0 && cStats->level_tombstone_counts != nullptr)
     {
         stats.levelTombstoneCounts.resize(cStats->num_levels);
@@ -257,6 +291,7 @@ Stats ColumnFamily::getStats() const
         cfConfig.syncMode = static_cast<SyncMode>(cStats->config->sync_mode);
         cfConfig.syncIntervalUs = cStats->config->sync_interval_us;
         cfConfig.comparatorName = cStats->config->comparator_name;
+        cfConfig.comparatorCtxStr = cStats->config->comparator_ctx_str;
         cfConfig.skipListMaxLevel = cStats->config->skip_list_max_level;
         cfConfig.skipListProbability = cStats->config->skip_list_probability;
         cfConfig.defaultIsolationLevel =
@@ -425,6 +460,11 @@ void ColumnFamily::updateRuntimeConfig(const ColumnFamilyConfig& config, bool pe
                      TDB_MAX_COMPARATOR_NAME - 1);
     }
     std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
+    if (!config.comparatorCtxStr.empty())
+    {
+        std::strncpy(cConfig.comparator_ctx_str, config.comparatorCtxStr.c_str(),
+                     TDB_MAX_COMPARATOR_CTX - 1);
+    }
     cConfig.comparator_fn_cached = nullptr;
     cConfig.comparator_ctx_cached = nullptr;
     cConfig.commit_hook_fn = nullptr;
@@ -603,7 +643,7 @@ std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf, std::string_view ke
     checkResult(result, "failed to get value");
 
     std::vector<std::uint8_t> valueVec(valueData, valueData + valueSize);
-    std::free(valueData);
+    tidesdb_free(valueData);
     return valueVec;
 }
 
@@ -616,7 +656,7 @@ std::vector<std::uint8_t> Transaction::get(ColumnFamily& cf, const std::vector<s
     checkResult(result, "failed to get value");
 
     std::vector<std::uint8_t> valueVec(valueData, valueData + valueSize);
-    std::free(valueData);
+    tidesdb_free(valueData);
     return valueVec;
 }
 
@@ -808,6 +848,11 @@ void TidesDB::createColumnFamily(const std::string& name, const ColumnFamilyConf
                      TDB_MAX_COMPARATOR_NAME - 1);
     }
     std::memset(cConfig.comparator_ctx_str, 0, TDB_MAX_COMPARATOR_CTX);
+    if (!config.comparatorCtxStr.empty())
+    {
+        std::strncpy(cConfig.comparator_ctx_str, config.comparatorCtxStr.c_str(),
+                     TDB_MAX_COMPARATOR_CTX - 1);
+    }
     cConfig.comparator_fn_cached = nullptr;
     cConfig.comparator_ctx_cached = nullptr;
     cConfig.commit_hook_fn = config.commitHookFn;
@@ -854,9 +899,9 @@ std::vector<std::string> TidesDB::listColumnFamilies()
     for (int i = 0; i < count; ++i)
     {
         cfNames.emplace_back(names[i]);
-        std::free(names[i]);
+        tidesdb_free(names[i]);
     }
-    std::free(names);
+    tidesdb_free(names);
 
     return cfNames;
 }
@@ -916,6 +961,15 @@ DbStats TidesDB::getDbStats()
     stats.totalUploads = cStats.total_uploads;
     stats.totalUploadFailures = cStats.total_upload_failures;
     stats.replicaMode = cStats.replica_mode != 0;
+
+    stats.uwalBytesWritten = cStats.uwal_bytes_written;
+    stats.walBytesWritten = cStats.wal_bytes_written;
+    stats.flushBytesWritten = cStats.flush_bytes_written;
+    stats.compactionBytesWritten = cStats.compaction_bytes_written;
+    stats.compactionBytesRead = cStats.compaction_bytes_read;
+    stats.userBytesWritten = cStats.user_bytes_written;
+    stats.flushCount = cStats.flush_count;
+    stats.compactionCount = cStats.compaction_count;
 
     return stats;
 }
@@ -986,6 +1040,12 @@ void TidesDB::promoteToPrimary()
 {
     int result = tidesdb_promote_to_primary(db_);
     checkResult(result, "failed to promote to primary");
+}
+
+void TidesDB::cancelBackgroundWork()
+{
+    int result = tidesdb_cancel_background_work(db_);
+    checkResult(result, "failed to cancel background work");
 }
 
 ObjectStoreConfig ObjectStoreConfig::defaultConfig()

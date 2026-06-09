@@ -114,7 +114,8 @@ enum class ErrorCode
     InvalidDB = TDB_ERR_INVALID_DB,
     Unknown = TDB_ERR_UNKNOWN,
     Locked = TDB_ERR_LOCKED,
-    Readonly = TDB_ERR_READONLY
+    Readonly = TDB_ERR_READONLY,
+    Busy = TDB_ERR_BUSY
 };
 
 /**
@@ -163,6 +164,8 @@ class Exception : public std::runtime_error
                 return "database is locked";
             case TDB_ERR_READONLY:
                 return "database is read-only";
+            case TDB_ERR_BUSY:
+                return "database is busy";
             default:
                 return "unknown error";
         }
@@ -171,6 +174,172 @@ class Exception : public std::runtime_error
    private:
     ErrorCode code_;
 };
+
+/**
+ * @brief Initialize TidesDB with optional custom memory allocation functions
+ *
+ * Calling this is optional: the first @ref TidesDB open lazily initializes the
+ * library with the system allocator. Call init() explicitly *before* opening any
+ * database only when you need to install custom allocators (e.g. embedding inside
+ * Redis or another host that owns memory). Pass nullptr for any function to keep
+ * the corresponding system allocator. Must be called at most once before a
+ * matching @ref finalize.
+ *
+ * @param mallocFn Custom malloc (or nullptr for system malloc)
+ * @param callocFn Custom calloc (or nullptr for system calloc)
+ * @param reallocFn Custom realloc (or nullptr for system realloc)
+ * @param freeFn Custom free (or nullptr for system free)
+ * @return true if this call performed initialization, false if TidesDB was
+ *         already initialized (the allocators are left unchanged)
+ */
+bool init(tidesdb_malloc_fn mallocFn = nullptr, tidesdb_calloc_fn callocFn = nullptr,
+          tidesdb_realloc_fn reallocFn = nullptr, tidesdb_free_fn freeFn = nullptr);
+
+/**
+ * @brief Finalize TidesDB and reset the allocator
+ *
+ * Call after all TidesDB operations are complete (all databases closed). After
+ * this returns, @ref init may be called again with different allocators.
+ */
+void finalize();
+
+/**
+ * @brief Raise this process's open-file ceiling toward @p desired descriptors
+ *
+ * Lets a database keep more SSTables open. Must be called BEFORE opening the
+ * database -- the engine sizes its open-SSTable cap to fit the ceiling at open
+ * time. This is an explicit, opt-in operator action; TidesDB never raises the
+ * limit itself. A failed or partial raise is non-fatal.
+ *
+ * @param desired Target descriptor count; <= 0 just reports the current ceiling
+ * @return The open-file ceiling in effect after the attempt
+ */
+long raiseOpenFileLimit(long desired);
+
+/**
+ * @brief Built-in comparator function pointers
+ *
+ * These match the comparators TidesDB registers by name. Use the matching name
+ * string in @ref ColumnFamilyConfig::comparatorName to select one for a column
+ * family, or pass the function pointer directly to
+ * @ref TidesDB::registerComparator when wrapping one under a different name.
+ */
+namespace comparators
+{
+/** Binary byte-by-byte comparison (registered name "memcmp", the default). */
+inline const tidesdb_comparator_fn memcmp = tidesdb_comparator_memcmp;
+/** Null-terminated string comparison (registered name "lexicographic"). */
+inline const tidesdb_comparator_fn lexicographic = tidesdb_comparator_lexicographic;
+/** Unsigned 64-bit integer comparison (registered name "uint64"). */
+inline const tidesdb_comparator_fn uint64 = tidesdb_comparator_uint64;
+/** Signed 64-bit integer comparison (registered name "int64"). */
+inline const tidesdb_comparator_fn int64 = tidesdb_comparator_int64;
+/** Reverse binary comparison (registered name "reverse"). */
+inline const tidesdb_comparator_fn reverseMemcmp = tidesdb_comparator_reverse_memcmp;
+/** Case-insensitive ASCII comparison (registered name "case_insensitive"). */
+inline const tidesdb_comparator_fn caseInsensitive = tidesdb_comparator_case_insensitive;
+}  // namespace comparators
+
+/**
+ * @brief Object store connector factories
+ *
+ * A connector returned by these factories is handed to @ref Config::objectStore.
+ * Ownership transfers to the database on a successful open -- the database frees
+ * the connector when it closes, so callers must not destroy it themselves. If
+ * @ref TidesDB construction throws, the connector is leaked by the C library, so
+ * only build a connector immediately before opening.
+ */
+namespace objstore
+{
+/**
+ * @brief Create a filesystem-backed object store connector
+ *
+ * Stores objects as files under @p rootDir mirroring the key path structure.
+ * Always available. Intended for testing and local replication.
+ * @param rootDir Directory to store objects in
+ * @return Connector handle, or nullptr on error
+ */
+inline tidesdb_objstore_t* filesystem(const std::string& rootDir)
+{
+    return tidesdb_objstore_fs_create(rootDir.c_str());
+}
+
+/**
+ * @brief Create an S3-compatible connector (AWS S3, MinIO, etc.)
+ *
+ * The underlying libtidesdb must have been built with TIDESDB_WITH_S3=ON;
+ * otherwise this symbol is unresolved at link time. Empty @p prefix or
+ * @p region are forwarded as nullptr.
+ *
+ * @param endpoint S3 endpoint (e.g. "s3.amazonaws.com" or "minio.local:9000")
+ * @param bucket Bucket name
+ * @param prefix Key prefix (e.g. "production/db1/"), or empty for none
+ * @param accessKey AWS access key ID
+ * @param secretKey AWS secret access key
+ * @param region AWS region (e.g. "us-east-1"), or empty for MinIO
+ * @param useSsl true for HTTPS, false for HTTP
+ * @param usePathStyle true for path-style URLs (MinIO), false for virtual-hosted (AWS)
+ * @return Connector handle, or nullptr on error
+ */
+inline tidesdb_objstore_t* s3(const std::string& endpoint, const std::string& bucket,
+                              const std::string& prefix, const std::string& accessKey,
+                              const std::string& secretKey, const std::string& region, bool useSsl,
+                              bool usePathStyle)
+{
+    return tidesdb_objstore_s3_create(endpoint.c_str(), bucket.c_str(),
+                                      prefix.empty() ? nullptr : prefix.c_str(), accessKey.c_str(),
+                                      secretKey.c_str(), region.empty() ? nullptr : region.c_str(),
+                                      useSsl ? 1 : 0, usePathStyle ? 1 : 0);
+}
+
+/**
+ * @brief Full S3 connector configuration including TLS and multipart tuning
+ *
+ * The all-default values are secure (TLS verification on, no custom CA) and use
+ * the library's built-in multipart sizes.
+ */
+struct S3Config
+{
+    std::string endpoint;                // S3 endpoint (required)
+    std::string bucket;                  // Bucket name (required)
+    std::string prefix;                  // Key prefix, or empty for none
+    std::string accessKey;               // AWS access key ID (required)
+    std::string secretKey;               // AWS secret access key (required)
+    std::string region;                  // AWS region, or empty for the default
+    bool useSsl = true;                  // true for HTTPS, false for HTTP
+    bool usePathStyle = false;           // true for path-style URLs (MinIO)
+    std::string tlsCaPath;               // Custom CA bundle path, or empty for the system bundle
+    bool tlsInsecureSkipVerify = false;  // true disables TLS verification (test only, insecure)
+    std::size_t multipartThreshold = 0;  // Multipart upload threshold in bytes (0 = default)
+    std::size_t multipartPartSize = 0;   // Multipart chunk size in bytes (0 = default)
+};
+
+/**
+ * @brief Create an S3-compatible connector from a full configuration struct
+ *
+ * Exposes TLS and multipart settings the positional @ref s3 overload cannot.
+ * Requires a libtidesdb built with TIDESDB_WITH_S3=ON.
+ * @param config Connector configuration (fields are copied; need not outlive the call)
+ * @return Connector handle, or nullptr on error
+ */
+inline tidesdb_objstore_t* s3(const S3Config& config)
+{
+    tidesdb_objstore_s3_config_t c{};
+    c.endpoint = config.endpoint.c_str();
+    c.bucket = config.bucket.c_str();
+    c.prefix = config.prefix.empty() ? nullptr : config.prefix.c_str();
+    c.access_key = config.accessKey.c_str();
+    c.secret_key = config.secretKey.c_str();
+    c.region = config.region.empty() ? nullptr : config.region.c_str();
+    c.use_ssl = config.useSsl ? 1 : 0;
+    c.use_path_style = config.usePathStyle ? 1 : 0;
+    c.tls_ca_path = config.tlsCaPath.empty() ? nullptr : config.tlsCaPath.c_str();
+    c.tls_insecure_skip_verify = config.tlsInsecureSkipVerify ? 1 : 0;
+    c.multipart_threshold = config.multipartThreshold;
+    c.multipart_part_size = config.multipartPartSize;
+    return tidesdb_objstore_s3_create_config(&c);
+}
+}  // namespace objstore
 
 // Forward declarations
 class TidesDB;
@@ -196,6 +365,7 @@ struct ColumnFamilyConfig
     SyncMode syncMode = SyncMode::Interval;
     std::uint64_t syncIntervalUs = 128000;
     std::string comparatorName;
+    std::string comparatorCtxStr;  // Context string persisted alongside comparatorName
     int skipListMaxLevel = 12;
     float skipListProbability = 0.25f;
     IsolationLevel defaultIsolationLevel = IsolationLevel::ReadCommitted;
@@ -322,6 +492,17 @@ struct Stats
         levelTombstoneCounts;    // Per-level tombstone counts (parallels levelKeyCounts)
     double maxSstDensity = 0.0;  // Worst per-SSTable tombstone density observed (0.0 to 1.0)
     int maxSstDensityLevel = 0;  // 1-based level where maxSstDensity was observed (0 if none)
+    // Write-amplification counters (lifetime since open, on-disk framed bytes). Divide the
+    // write totals by userBytesWritten for this CF's write amplification. walBytesWritten is
+    // zero in unified memtable mode (the shared WAL volume is reported db-wide in
+    // DbStats::uwalBytesWritten). The *Count fields count output SSTables.
+    std::uint64_t walBytesWritten = 0;         // Framed bytes appended to this CF's WAL
+    std::uint64_t flushBytesWritten = 0;       // On-disk bytes this CF's flushes wrote to L0
+    std::uint64_t compactionBytesWritten = 0;  // On-disk bytes this CF's compactions wrote
+    std::uint64_t compactionBytesRead = 0;     // On-disk bytes this CF's compactions read as input
+    std::uint64_t userBytesWritten = 0;        // Logical key+value bytes committed (WA denominator)
+    std::uint64_t flushCount = 0;              // Flushed SSTables produced by this CF
+    std::uint64_t compactionCount = 0;         // Compaction output SSTables produced by this CF
 };
 
 /**
@@ -360,6 +541,18 @@ struct DbStats
     std::uint64_t totalUploads = 0;
     std::uint64_t totalUploadFailures = 0;
     bool replicaMode = false;
+    // Write-amplification counters (lifetime since open, on-disk framed bytes). uwalBytesWritten
+    // is the shared unified WAL volume (zero when unified mode is off); the remaining fields are
+    // summed across all column families. db-wide WA = (uwal + wal + flush + compaction) / user
+    // bytes. The *Count fields count output SSTables, not logical runs.
+    std::uint64_t uwalBytesWritten = 0;        // Framed bytes appended to the shared unified WAL
+    std::uint64_t walBytesWritten = 0;         // Per-CF WAL bytes summed across all CFs
+    std::uint64_t flushBytesWritten = 0;       // Flush output bytes summed across all CFs
+    std::uint64_t compactionBytesWritten = 0;  // Compaction output bytes summed across all CFs
+    std::uint64_t compactionBytesRead = 0;     // Compaction input bytes summed across all CFs
+    std::uint64_t userBytesWritten = 0;        // Logical committed bytes summed across all CFs
+    std::uint64_t flushCount = 0;              // Flushed SSTables summed across all CFs
+    std::uint64_t compactionCount = 0;         // Compaction output SSTables summed across all CFs
 };
 
 /**
@@ -829,6 +1022,16 @@ class TidesDB
      * @brief Switch a read-only replica to primary mode
      */
     void promoteToPrimary();
+
+    /**
+     * @brief Cancel background compaction db-wide for a fast shutdown
+     *
+     * In-flight merges bail out safely and queued compaction is skipped; flushes
+     * are unaffected so durability is preserved. Blocks (bounded) until compaction
+     * is idle. The cancellation is sticky for the session and reset on the next
+     * open -- intended to be called right before closing the database.
+     */
+    void cancelBackgroundWork();
 
     /**
      * @brief Get default database configuration
