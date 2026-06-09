@@ -1709,7 +1709,11 @@ TEST_F(TidesDBTest, TombstoneStatsAfterDeletes)
     tidesdb::TidesDB db(getConfig());
 
     auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
-    cfConfig.writeBufferSize = 1024;  // small buffer to make flushes cheap
+    // Use a large write buffer so the puts and the deletes each flush to a single
+    // L0 SSTable. With a tiny buffer the keys spread across many L0 files, crossing
+    // l1_file_count_trigger and letting background compaction purge the delete
+    // tombstones before they can be observed here.
+    cfConfig.writeBufferSize = 64 * 1024 * 1024;
     db.createColumnFamily("ts_cf", cfConfig);
 
     auto cf = db.getColumnFamily("ts_cf");
@@ -1867,9 +1871,319 @@ TEST_F(TidesDBTest, MaxConcurrentFlushesDefault)
 {
     auto defaultConfig = tidesdb::TidesDB::defaultConfig();
 
-    // Proves the value is sourced from tidesdb_default_config() rather than zero-initialized
-    ASSERT_GT(defaultConfig.maxConcurrentFlushes, 0)
-        << "default max_concurrent_flushes should be sourced from C library defaults";
+    // 0 is the documented sentinel returned by tidesdb_default_config(): at open time
+    // the engine pins max_concurrent_flushes to the resolved num_flush_threads. Assert
+    // the sentinel is carried through faithfully rather than altered by the wrapper.
+    ASSERT_EQ(defaultConfig.maxConcurrentFlushes, 0)
+        << "default max_concurrent_flushes should match the C library sentinel (0 = auto)";
+
+    // The sentinel must be accepted by open and resolved internally without error.
+    auto cfg = getConfig();
+    cfg.maxConcurrentFlushes = defaultConfig.maxConcurrentFlushes;
+    ASSERT_NO_THROW({ tidesdb::TidesDB db(cfg); });
+}
+
+TEST_F(TidesDBTest, ErrorCodeBusy)
+{
+    // Verify the Busy error code maps correctly
+    ASSERT_EQ(static_cast<int>(tidesdb::ErrorCode::Busy), TDB_ERR_BUSY);
+    ASSERT_EQ(static_cast<int>(tidesdb::ErrorCode::Busy), -14);
+
+    std::string msg = tidesdb::Exception::errorMessage(TDB_ERR_BUSY);
+    ASSERT_EQ(msg, "database is busy");
+}
+
+// Counting allocator state shared with non-capturing lambdas (statics, not captures)
+static std::atomic<int> g_allocMallocCalls{0};
+static std::atomic<int> g_allocFreeCalls{0};
+
+TEST_F(TidesDBTest, InitFinalizeCustomAllocator)
+{
+    // Reset any lazy initialization performed by earlier tests so init() is deterministic.
+    tidesdb::finalize();
+
+    g_allocMallocCalls = 0;
+    g_allocFreeCalls = 0;
+
+    auto countingMalloc = [](std::size_t size) -> void*
+    {
+        g_allocMallocCalls.fetch_add(1);
+        return std::malloc(size);
+    };
+    auto countingCalloc = [](std::size_t n, std::size_t size) -> void*
+    { return std::calloc(n, size); };
+    auto countingRealloc = [](void* p, std::size_t size) -> void* { return std::realloc(p, size); };
+    auto countingFree = [](void* p)
+    {
+        if (p) g_allocFreeCalls.fetch_add(1);
+        std::free(p);
+    };
+
+    // Non-capturing lambdas convert to plain C function pointers.
+    ASSERT_TRUE(tidesdb::init(countingMalloc, countingCalloc, countingRealloc, countingFree));
+    // A second init is a no-op while already initialized.
+    ASSERT_FALSE(tidesdb::init());
+
+    {
+        tidesdb::TidesDB db(getConfig());
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        db.createColumnFamily("alloc_cf", cfConfig);
+        auto cf = db.getColumnFamily("alloc_cf");
+        auto txn = db.beginTransaction();
+        txn.put(cf, "k", "v", -1);
+        txn.commit();
+    }
+
+    EXPECT_GT(g_allocMallocCalls.load(), 0);
+    EXPECT_GT(g_allocFreeCalls.load(), 0);
+
+    // Reset and re-establish a clean default-allocator init for subsequent tests.
+    tidesdb::finalize();
+    ASSERT_TRUE(tidesdb::init());
+}
+
+TEST_F(TidesDBTest, RaiseOpenFileLimit)
+{
+    // desired <= 0 just reports the current ceiling
+    long current = tidesdb::raiseOpenFileLimit(0);
+    ASSERT_GT(current, 0);
+
+    // Requesting the current ceiling should report a non-negative ceiling back
+    long raised = tidesdb::raiseOpenFileLimit(current);
+    ASSERT_GE(raised, 0);
+}
+
+TEST_F(TidesDBTest, CancelBackgroundWork)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;  // small buffer to spawn flushes/compaction
+    db.createColumnFamily("cbw_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("cbw_cf");
+
+    for (int batch = 0; batch < 3; ++batch)
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 50; ++i)
+        {
+            txn.put(cf, "k" + std::to_string(batch) + "_" + std::to_string(i), "value", -1);
+        }
+        txn.commit();
+        cf.flushMemtable();
+    }
+
+    // Sticky cancellation of background compaction -- should return cleanly
+    ASSERT_NO_THROW(db.cancelBackgroundWork());
+}
+
+TEST_F(TidesDBTest, BuiltInComparators)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    for (const std::string& name : {std::string("memcmp"), std::string("lexicographic"),
+                                    std::string("reverse"), std::string("case_insensitive")})
+    {
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        cfConfig.comparatorName = name;
+        db.createColumnFamily("cmp_" + name, cfConfig);
+
+        auto cf = db.getColumnFamily("cmp_" + name);
+        {
+            auto txn = db.beginTransaction();
+            txn.put(cf, "alpha", "1", -1);
+            txn.put(cf, "beta", "2", -1);
+            txn.commit();
+        }
+
+        auto txn = db.beginTransaction();
+        auto value = txn.get(cf, "alpha");
+        ASSERT_EQ(std::string(value.begin(), value.end()), "1");
+
+        auto stats = cf.getStats();
+        if (stats.config.has_value())
+        {
+            ASSERT_EQ(stats.config->comparatorName, name);
+        }
+    }
+}
+
+TEST_F(TidesDBTest, ReverseComparatorOrdering)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.comparatorName = "reverse";
+    db.createColumnFamily("rev_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("rev_cf");
+    {
+        auto txn = db.beginTransaction();
+        txn.put(cf, "a", "1", -1);
+        txn.put(cf, "b", "2", -1);
+        txn.put(cf, "c", "3", -1);
+        txn.commit();
+    }
+
+    // Reverse comparator: the first key in iteration order is the largest
+    auto txn = db.beginTransaction();
+    auto iter = txn.newIterator(cf);
+    iter.seekToFirst();
+    ASSERT_TRUE(iter.valid());
+    auto key = iter.key();
+    ASSERT_EQ(std::string(key.begin(), key.end()), "c");
+}
+
+TEST_F(TidesDBTest, ComparatorFunctionPointers)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    // The exposed built-in function pointers are non-null
+    ASSERT_NE(tidesdb::comparators::memcmp, nullptr);
+    ASSERT_NE(tidesdb::comparators::uint64, nullptr);
+    ASSERT_NE(tidesdb::comparators::reverseMemcmp, nullptr);
+
+    // Register a built-in function pointer under a custom name and read it back
+    db.registerComparator("my_reverse", tidesdb::comparators::reverseMemcmp);
+
+    tidesdb_comparator_fn fn = nullptr;
+    void* ctx = nullptr;
+    db.getComparator("my_reverse", &fn, &ctx);
+    ASSERT_EQ(fn, tidesdb::comparators::reverseMemcmp);
+}
+
+TEST_F(TidesDBTest, ComparatorCtxStrIniRoundTrip)
+{
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.comparatorName = "uint64";
+    cfConfig.comparatorCtxStr = "endian=little";
+
+    std::string iniPath = testDbPath_ + "_cfg.ini";
+    fs::remove(iniPath);
+
+    tidesdb::ColumnFamilyConfig::saveToIni(iniPath, "cf_section", cfConfig);
+    auto loaded = tidesdb::ColumnFamilyConfig::loadFromIni(iniPath, "cf_section");
+
+    ASSERT_EQ(loaded.comparatorName, "uint64");
+    ASSERT_EQ(loaded.comparatorCtxStr, "endian=little");
+
+    fs::remove(iniPath);
+}
+
+TEST_F(TidesDBTest, WriteAmplificationStats)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;  // small buffer to force a flush
+    db.createColumnFamily("wa_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("wa_cf");
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 200; ++i)
+        {
+            txn.put(cf, "key" + std::to_string(i), std::string(64, 'x'), -1);
+        }
+        txn.commit();
+    }
+    cf.flushMemtable();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    auto stats = cf.getStats();
+
+    ASSERT_GT(stats.userBytesWritten, 0u);
+    ASSERT_GT(stats.flushBytesWritten, 0u);
+    ASSERT_GE(stats.flushCount, 1u);
+    ASSERT_GE(stats.compactionBytesWritten, 0u);
+    ASSERT_GE(stats.compactionBytesRead, 0u);
+    ASSERT_GE(stats.walBytesWritten, 0u);
+}
+
+TEST_F(TidesDBTest, DbStatsWriteAmplification)
+{
+    tidesdb::TidesDB db(getConfig());
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    cfConfig.writeBufferSize = 1024;
+    db.createColumnFamily("dbwa_cf", cfConfig);
+
+    auto cf = db.getColumnFamily("dbwa_cf");
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 200; ++i)
+        {
+            txn.put(cf, "key" + std::to_string(i), std::string(64, 'y'), -1);
+        }
+        txn.commit();
+    }
+    cf.flushMemtable();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    auto stats = db.getDbStats();
+
+    ASSERT_GT(stats.userBytesWritten, 0u);
+    ASSERT_GT(stats.flushBytesWritten, 0u);
+    // Per-CF WAL volume is reported (unified mode is off, so uwal stays zero)
+    ASSERT_GE(stats.walBytesWritten, 0u);
+    ASSERT_EQ(stats.uwalBytesWritten, 0u);
+}
+
+TEST_F(TidesDBTest, FilesystemObjectStore)
+{
+    std::string objDir = testDbPath_ + "_objstore";
+    fs::remove_all(objDir);
+
+    {
+        tidesdb::Config config = getConfig();
+        config.objectStore = tidesdb::objstore::filesystem(objDir);
+        ASSERT_NE(config.objectStore, nullptr);
+        config.objectStoreConfig = tidesdb::ObjectStoreConfig::defaultConfig();
+
+        // Object store mode requires (and auto-enables) unified memtable mode
+        tidesdb::TidesDB db(config);
+
+        auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+        db.createColumnFamily("os_cf", cfConfig);
+
+        auto cf = db.getColumnFamily("os_cf");
+        {
+            auto txn = db.beginTransaction();
+            txn.put(cf, "okey", "ovalue", -1);
+            txn.commit();
+        }
+        cf.flushMemtable();
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+        auto dbStats = db.getDbStats();
+        ASSERT_TRUE(dbStats.objectStoreEnabled);
+
+        {
+            auto txn = db.beginTransaction();
+            auto value = txn.get(cf, "okey");
+            ASSERT_EQ(std::string(value.begin(), value.end()), "ovalue");
+        }
+    }
+
+    fs::remove_all(objDir);
+}
+
+TEST_F(TidesDBTest, S3ConfigStructDefaults)
+{
+    // Construct the S3 config struct (does not link the S3 connector symbol).
+    tidesdb::objstore::S3Config cfg;
+    cfg.endpoint = "s3.amazonaws.com";
+    cfg.bucket = "my-bucket";
+    cfg.accessKey = "ak";
+    cfg.secretKey = "sk";
+    cfg.region = "us-east-1";
+
+    ASSERT_TRUE(cfg.useSsl);
+    ASSERT_FALSE(cfg.usePathStyle);
+    ASSERT_FALSE(cfg.tlsInsecureSkipVerify);
+    ASSERT_EQ(cfg.multipartThreshold, 0u);
+    ASSERT_EQ(cfg.multipartPartSize, 0u);
 }
 
 int main(int argc, char** argv)
