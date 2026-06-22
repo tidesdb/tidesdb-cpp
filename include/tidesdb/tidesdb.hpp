@@ -115,7 +115,8 @@ enum class ErrorCode
     Unknown = TDB_ERR_UNKNOWN,
     Locked = TDB_ERR_LOCKED,
     Readonly = TDB_ERR_READONLY,
-    Busy = TDB_ERR_BUSY
+    Busy = TDB_ERR_BUSY,
+    Precondition = TDB_ERR_PRECONDITION
 };
 
 /**
@@ -166,6 +167,8 @@ class Exception : public std::runtime_error
                 return "database is read-only";
             case TDB_ERR_BUSY:
                 return "database is busy";
+            case TDB_ERR_PRECONDITION:
+                return "precondition failed";
             default:
                 return "unknown error";
         }
@@ -459,6 +462,9 @@ struct Config
     std::uint64_t unifiedMemtableSyncIntervalUs = 0;    // Sync interval for unified WAL
     int maxConcurrentFlushes =
         0;  // Global cap on in-flight memtable flushes across all CFs (0 = library default)
+    bool finishCompactionsOnClose =
+        false;  // false = cancel in-flight compactions at their next checkpoint for a fast
+                // shutdown (no data loss); true = let them run to completion before close returns
     tidesdb_objstore_t* objectStore =
         nullptr;  // Pluggable object store connector (nullptr = local only)
     std::optional<ObjectStoreConfig>
@@ -541,6 +547,12 @@ struct DbStats
     std::uint64_t totalUploads = 0;
     std::uint64_t totalUploadFailures = 0;
     bool replicaMode = false;
+    // Single-writer fencing (object-store mode). primaryEpoch is the lease epoch this primary
+    // currently holds (0 when not a primary / no lease); seenEpoch is the highest lease epoch a
+    // replica has observed. A promotion that took bumps primaryEpoch; a fenced primary sees
+    // replicaMode flip back to true.
+    std::uint64_t primaryEpoch = 0;
+    std::uint64_t seenEpoch = 0;
     // Write-amplification counters (lifetime since open, on-disk framed bytes). uwalBytesWritten
     // is the shared unified WAL volume (zero when unified mode is off); the remaining fields are
     // summed across all column families. db-wide WA = (uwal + wal + flush + compaction) / user

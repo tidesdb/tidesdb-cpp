@@ -749,6 +749,7 @@ TidesDB::TidesDB(const Config& config)
     cConfig.unified_memtable_sync_mode = static_cast<int>(config.unifiedMemtableSyncMode);
     cConfig.unified_memtable_sync_interval_us = config.unifiedMemtableSyncIntervalUs;
     cConfig.max_concurrent_flushes = config.maxConcurrentFlushes;
+    cConfig.finish_compactions_on_close = config.finishCompactionsOnClose ? 1 : 0;
     cConfig.object_store = config.objectStore;
 
     tidesdb_objstore_config_t osCfg;
@@ -961,6 +962,8 @@ DbStats TidesDB::getDbStats()
     stats.totalUploads = cStats.total_uploads;
     stats.totalUploadFailures = cStats.total_upload_failures;
     stats.replicaMode = cStats.replica_mode != 0;
+    stats.primaryEpoch = cStats.primary_epoch;
+    stats.seenEpoch = cStats.seen_epoch;
 
     stats.uwalBytesWritten = cStats.uwal_bytes_written;
     stats.walBytesWritten = cStats.wal_bytes_written;
@@ -1094,6 +1097,7 @@ Config TidesDB::defaultConfig()
     config.unifiedMemtableSyncMode = static_cast<SyncMode>(cConfig.unified_memtable_sync_mode);
     config.unifiedMemtableSyncIntervalUs = cConfig.unified_memtable_sync_interval_us;
     config.maxConcurrentFlushes = cConfig.max_concurrent_flushes;
+    config.finishCompactionsOnClose = cConfig.finish_compactions_on_close != 0;
     config.objectStore = nullptr;
     config.objectStoreConfig = std::nullopt;
 
