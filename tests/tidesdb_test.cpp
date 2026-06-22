@@ -1648,6 +1648,10 @@ TEST_F(TidesDBTest, DbStatsUnifiedFields)
     ASSERT_TRUE(dbStats.unifiedMemtableEnabled);
     ASSERT_FALSE(dbStats.objectStoreEnabled);
     ASSERT_FALSE(dbStats.replicaMode);
+
+    // Single-writer fencing epochs are reported and zero when not in object-store mode
+    ASSERT_EQ(dbStats.primaryEpoch, 0u);
+    ASSERT_EQ(dbStats.seenEpoch, 0u);
 }
 
 TEST_F(TidesDBTest, ErrorCodeReadonly)
@@ -1659,6 +1663,50 @@ TEST_F(TidesDBTest, ErrorCodeReadonly)
     // Verify error message
     std::string msg = tidesdb::Exception::errorMessage(TDB_ERR_READONLY);
     ASSERT_EQ(msg, "database is read-only");
+}
+
+TEST_F(TidesDBTest, ErrorCodePrecondition)
+{
+    // Verify the Precondition error code maps correctly
+    ASSERT_EQ(static_cast<int>(tidesdb::ErrorCode::Precondition), TDB_ERR_PRECONDITION);
+    ASSERT_EQ(static_cast<int>(tidesdb::ErrorCode::Precondition), -15);
+
+    // Verify error message
+    std::string msg = tidesdb::Exception::errorMessage(TDB_ERR_PRECONDITION);
+    ASSERT_EQ(msg, "precondition failed");
+}
+
+TEST_F(TidesDBTest, FinishCompactionsOnClose)
+{
+    // Default should leave the fast-shutdown behavior (cancel in-flight compactions)
+    auto defaultConfig = tidesdb::TidesDB::defaultConfig();
+    ASSERT_FALSE(defaultConfig.finishCompactionsOnClose);
+
+    // Opening with the flag enabled must succeed; close runs in-flight compactions to completion
+    tidesdb::Config config = getConfig();
+    config.finishCompactionsOnClose = true;
+
+    tidesdb::TidesDB db(config);
+
+    auto cfConfig = tidesdb::ColumnFamilyConfig::defaultConfig();
+    db.createColumnFamily("test_cf", cfConfig);
+    auto cf = db.getColumnFamily("test_cf");
+
+    {
+        auto txn = db.beginTransaction();
+        for (int i = 0; i < 50; ++i)
+        {
+            txn.put(cf, "key_" + std::to_string(i), "value_" + std::to_string(i), -1);
+        }
+        txn.commit();
+    }
+
+    auto value = [&]
+    {
+        auto txn = db.beginTransaction();
+        return txn.get(cf, "key_0");
+    }();
+    ASSERT_FALSE(value.empty());
 }
 
 TEST_F(TidesDBTest, DefaultConfigUnifiedFields)
@@ -1982,6 +2030,20 @@ TEST_F(TidesDBTest, BuiltInComparators)
 {
     tidesdb::TidesDB db(getConfig());
 
+    // The "lexicographic" comparator is strcmp-based and treats keys as NUL-terminated C
+    // strings (it ignores the key sizes), so keys handed to it MUST carry a trailing '\0';
+    // otherwise strcmp reads past the stored key into adjacent memory, producing
+    // non-deterministic ordering and flaky lookups. Build NUL-terminated key bytes here -- the
+    // trailing '\0' is harmless for the size-bounded comparators (memcmp, reverse,
+    // case_insensitive), which just treat it as an ordinary final byte present in both the
+    // stored key and the lookup key.
+    auto nulTerminatedKey = [](const std::string& s)
+    {
+        std::vector<std::uint8_t> bytes(s.begin(), s.end());
+        bytes.push_back('\0');
+        return bytes;
+    };
+
     for (const std::string& name : {std::string("memcmp"), std::string("lexicographic"),
                                     std::string("reverse"), std::string("case_insensitive")})
     {
@@ -1990,16 +2052,20 @@ TEST_F(TidesDBTest, BuiltInComparators)
         db.createColumnFamily("cmp_" + name, cfConfig);
 
         auto cf = db.getColumnFamily("cmp_" + name);
+        const auto alphaKey = nulTerminatedKey("alpha");
+        const auto betaKey = nulTerminatedKey("beta");
+        const std::vector<std::uint8_t> oneValue{'1'};
+        const std::vector<std::uint8_t> twoValue{'2'};
         {
             auto txn = db.beginTransaction();
-            txn.put(cf, "alpha", "1", -1);
-            txn.put(cf, "beta", "2", -1);
+            txn.put(cf, alphaKey, oneValue, -1);
+            txn.put(cf, betaKey, twoValue, -1);
             txn.commit();
         }
 
         auto txn = db.beginTransaction();
-        auto value = txn.get(cf, "alpha");
-        ASSERT_EQ(std::string(value.begin(), value.end()), "1");
+        auto value = txn.get(cf, alphaKey);
+        ASSERT_EQ(std::string(value.begin(), value.end()), "1") << "comparator: " << name;
 
         auto stats = cf.getStats();
         if (stats.config.has_value())
